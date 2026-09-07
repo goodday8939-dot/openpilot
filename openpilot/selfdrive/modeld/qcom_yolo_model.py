@@ -2,8 +2,25 @@
 from __future__ import annotations
 
 from functools import partial
+import hashlib
+import os
+from pathlib import Path
 
 import numpy as np
+
+BACKEND = 'QCOM:IR3'
+MESA_SHA256 = '9436d1bd3da1c4394523a3debef4df9451b967c264f5d48bf9aeee03430c1364'
+
+
+def configure_environment(directory: Path):
+  """Select the pinned YOLO compiler before importing tinygrad in this process."""
+  library = directory / 'lib' / 'libtinymesa.so'
+  if not library.is_file() or hashlib.sha256(library.read_bytes()).hexdigest() != MESA_SHA256:
+    raise ValueError('internal YOLO requires the verified experiment libtinymesa.so')
+  # tinygrad's DLL loader accepts an absolute MESA_PATH. No system installation
+  # or changes to the driving process's library search path are required.
+  os.environ.update(DEV=BACKEND, WARP_DEV='QCOM', MESA_PATH=str(library), IMAGE='0', FLOAT16='1',
+                    NOLOCALS='1', JIT_BATCH_SIZE='0', OPENPILOT_HACKS='1', QCOM_PRIORITY='15')
 
 
 def local_size_for(global_size):

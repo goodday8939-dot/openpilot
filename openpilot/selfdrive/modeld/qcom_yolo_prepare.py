@@ -22,8 +22,8 @@ def check_maintenance_state(processes, *, onroad, driver_preview):
 
 
 def compile_model(directory, input_nv12, camera_size, samples=60):
-  os.environ.update(DEV='QCOM', WARP_DEV='QCOM', IMAGE='0', FLOAT16='1', NOLOCALS='1',
-                    JIT_BATCH_SIZE='0', OPENPILOT_HACKS='1', QCOM_PRIORITY='15')
+  from openpilot.selfdrive.modeld.qcom_yolo_model import BACKEND, configure_environment
+  configure_environment(directory)
   from openpilot.cereal import messaging
   from openpilot.common.params import Params
   from openpilot.selfdrive.modeld.egpu_yolo import decode_detections
@@ -75,7 +75,7 @@ def compile_model(directory, input_nv12, camera_size, samples=60):
     time.sleep(.05)
   bundle = {'version': 1, 'run': run, 'layout': layout, 'model_id': manifest['model_id'],
             'width': model_size[0], 'height': model_size[1], 'names': manifest['names'],
-            'onnx_sha256': manifest['sha256'], 'device': 'QCOM',
+            'onnx_sha256': manifest['sha256'], 'device': BACKEND,
             'adapter_sha256': hashlib.sha256(Path(__file__).with_name('qcom_yolo_model.py').read_bytes()).hexdigest()}
   target = directory / 'yolo_qcom.pkl'
   temporary = target.with_suffix('.pkl.tmp')

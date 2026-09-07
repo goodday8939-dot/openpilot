@@ -5,6 +5,36 @@ from openpilot.selfdrive.modeld.qcom_yolo_model import camera_transform, letterb
 from openpilot.selfdrive.modeld.qcom_yolod import configured, permit_reason
 
 
+def test_backend_rejects_missing_or_modified_library_before_selecting_gpu(tmp_path, monkeypatch):
+  import os
+  from openpilot.selfdrive.modeld.qcom_yolo_model import configure_environment
+  monkeypatch.setenv('DEV', 'CPU:X86')
+  with pytest.raises(ValueError, match='verified'):
+    configure_environment(tmp_path)
+  (tmp_path / 'lib').mkdir()
+  (tmp_path / 'lib' / 'libtinymesa.so').write_bytes(b'wrong library')
+  with pytest.raises(ValueError, match='verified'):
+    configure_environment(tmp_path)
+  assert os.environ['DEV'] == 'CPU:X86'
+
+
+def test_backend_pins_verified_library_without_changing_system_search_path(tmp_path, monkeypatch):
+  import hashlib
+  import os
+  import openpilot.selfdrive.modeld.qcom_yolo_model as adapter
+  (tmp_path / 'lib').mkdir()
+  library = tmp_path / 'lib' / 'libtinymesa.so'
+  library.write_bytes(b'test library')
+  monkeypatch.setattr(adapter, 'MESA_SHA256', hashlib.sha256(library.read_bytes()).hexdigest())
+  for key in ('DEV', 'WARP_DEV', 'MESA_PATH', 'IMAGE', 'FLOAT16', 'NOLOCALS', 'JIT_BATCH_SIZE', 'OPENPILOT_HACKS', 'QCOM_PRIORITY'):
+    monkeypatch.setenv(key, os.environ.get(key, ''))
+  monkeypatch.setenv('LD_LIBRARY_PATH', '/original')
+  adapter.configure_environment(tmp_path)
+  assert os.environ['DEV'] == 'QCOM:IR3'
+  assert os.environ['MESA_PATH'] == str(library)
+  assert os.environ['LD_LIBRARY_PATH'] == '/original'
+
+
 @pytest.mark.parametrize('global_size', [(131072, 1, 1), (16, 8, 16), (3, 7, 11), (1, 1, 1), (12, 32, 64)])
 def test_workgroups_fit_hardware_budget_and_divide_global_size(global_size):
   local = local_size_for(global_size)

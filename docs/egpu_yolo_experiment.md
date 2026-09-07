@@ -110,7 +110,8 @@ are unchanged.
 | --- | ---: | ---: | --- |
 | Original FP32 buffer, 60 runs | 223.67 | 246.67 | Reference |
 | Direct NV12 + materialized FP32 Conv, 30 runs | 145.21 | 148.74 | Numerically validated |
-| Same with real FP32 Winograd, 30 runs | 84.12 | 87.19 | Best validated default-backend candidate |
+| Same with real FP32 Winograd, 30 runs | 84.12 | 87.19 | Validated Qualcomm-compiler fallback candidate |
+| FP32 Winograd + Mesa IR3, 30 runs | 66.64 | 69.89 | Selected; numerically validated |
 | FP16 storage / FP32 Conv, 30 runs | 125.16 | 127.85 | Low-confidence box drift; slower |
 | Mesa IR3 FP16 image Conv, 30 runs | 88.34 | 92.05 | Slight detection drift; slower |
 | Static INT8 Conv, 30 runs | 228.97 | 231.94 | Slower; not selected |
@@ -120,6 +121,8 @@ original ONNX Runtime FP32 network: maximum box/score error 0.00533, maximum
 box error 0.0000611 pixels among anchors above confidence 0.35, and matching
 classes. Workgroup variations gave roughly 82-85 ms with bit-exact outputs;
 that small difference is not treated as a robust additional speedup.
+The selected IR3 FP32 Winograd candidate additionally passed the same checks,
+with maximum box/score error 0.00481 and relevant-box error 0.0000611 pixels.
 
 INT8 was calibrated with 64 shuffled COCO128 images (seed 42), using ONNX
 Runtime 1.20.1 static QOperator quantization, unsigned activations, signed
@@ -138,8 +141,21 @@ packed INT8 dot-product kernel. A direct compiler probe rejected
 `cl_qcom_dot_product8` and `qcom_dot8_acc`; this describes the available compiler,
 not a claim that all runtimes on this hardware lack INT8 acceleration. Merely
 changing the model dtype therefore does not promise a faster inference.
-The alternative IR3 compiler/library was confined to the experimental process
-and `/data/egpu_yolo/lib`; system drivers and modeld were not changed.
+The selected IR3 compiler/library is confined to the optional YOLO process
+and `/data/egpu_yolo/lib`; system drivers and modeld are not changed. Preparation
+and worker startup select `DEV=QCOM:IR3` before importing tinygrad and point
+`MESA_PATH` at the verified local library. Older QCOM compiler artifacts are
+rejected by the backend and adapter fingerprint checks and must be rebuilt.
+
+The pinned dependency is the arm64 Linux Mesa 25.2.7 library referenced by the
+repository's tinygrad Mesa binding:
+`https://github.com/sirhcm/tinymesa/releases/download/v1/libtinymesa-mesa-25.2.7-linux-arm64.so`.
+Place it at `/data/egpu_yolo/lib/libtinymesa.so` while preparing the experiment;
+there is no onroad download or system library installation. Preparation and
+worker startup verify SHA-256
+`9436d1bd3da1c4394523a3debef4df9451b967c264f5d48bf9aeee03430c1364`.
+Missing or mismatched libraries disable the optional worker. Offroad compilation
+preserves the available CPU affinity when power management has CPUs 4-7 offline.
 
 ## Historical shared-eGPU execution and image coordinates
 

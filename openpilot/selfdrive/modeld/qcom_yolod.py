@@ -10,7 +10,7 @@ import time
 import numpy as np
 
 from openpilot.selfdrive.modeld.egpu_yolo import camera_detections, camera_time, decode_detections
-from openpilot.selfdrive.modeld.qcom_yolo_model import camera_transform
+from openpilot.selfdrive.modeld.qcom_yolo_model import BACKEND, camera_transform, configure_environment
 
 DIRECTORY = Path('/data/egpu_yolo')
 INTERVAL = .25
@@ -40,7 +40,11 @@ def configured(params, directory=DIRECTORY):
 
 
 def main():
-  os.environ.update(DEV='QCOM', FLOAT16='1', IMAGE='0', NOLOCALS='1', JIT_BATCH_SIZE='0', OPENPILOT_HACKS='1', QCOM_PRIORITY='15')
+  try:
+    configure_environment(DIRECTORY)
+  except (OSError, ValueError) as exc:
+    (DIRECTORY / 'qcom_fault').write_text(str(exc))
+    return
   from openpilot.cereal import messaging
   from openpilot.common.params import Params
   from openpilot.common.swaglog import cloudlog
@@ -95,7 +99,7 @@ def main():
         with (DIRECTORY / 'yolo_qcom.pkl').open('rb') as f:
           bundle = load_oob(f)
         expected = hashlib.sha256(Path(__file__).with_name('qcom_yolo_model.py').read_bytes()).hexdigest()
-        if bundle['version'] != 1 or bundle['device'] != 'QCOM' or bundle['adapter_sha256'] != expected:
+        if bundle['version'] != 1 or bundle['device'] != BACKEND or bundle['adapter_sha256'] != expected:
           raise ValueError('internal YOLO artifact mismatch')
       if not client.is_connected() and not client.connect(False):
         time.sleep(.1)
