@@ -216,8 +216,8 @@ baseline, 180 seconds enabled, and a 30-second disabled recovery in the same
 stationary scene. The GPU/CPU workers stayed loaded throughout these phases.
 All primary and camera publications were inspected with non-conflating sockets.
 There were 703 YOLO results, 3.91 Hz, with zero admission overruns and zero
-reported driving frame drops. Of those results, 690 contained distinct detection
-values; the remaining frames had no detection above threshold. This verifies
+reported driving frame drops. Of those results, 688 contained 690 distinct
+detections; 15 had no detection above threshold. This verifies
 live input changes, not general object-detection accuracy.
 
 | Live YOLO phase, 703 results | p50 ms | p95 ms | p99 ms | Maximum ms |
