@@ -42,6 +42,17 @@ deadline, Park and overrun guards remain active, so this is per-frame admission
 with conditional execution, not a guaranteed 20 Hz output. Continuous supervised
 stationary display now uses this mode. The focused suite passes 114 tests.
 
+The subsequent optimization caches validated input metadata for unchanged YOLO
+replays and halves result transport using FP16, with FP32 NMS in the separate CPU
+worker. It passed another 30/180/30-second stationary comparison: retained GPU
+cost fell from 4.80 to 4.35 ms median and from 5.69 to 4.99 ms maximum. The median
+remaining budget after GPU work increased from 4.78 to 5.20 ms on admitted
+frames. No guard was relaxed; zero YOLO overruns and driving drops were reported.
+Result rate was 11.32 Hz, so this trial did not improve rate over 11.62 Hz.
+CPU delivery/postprocessing tails remain unresolved (70.18 ms maximum full
+result latency). See the timing report for details. Continuous stationary
+display now uses the verified native FP16 artifact; 117 focused tests pass.
+
 The last internal-GPU continuous-display attempt had already stopped before
 the follow-up: 421 results, then a 150.47 ms model-publication gap with frame-ID
 delta 3 on the non-conflating observer. Its root cause remains unisolated.

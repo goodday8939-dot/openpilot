@@ -337,6 +337,104 @@ are visible. CPU candidate filtering/NMS can cost more with more candidates;
 the decoder caps this at 200 candidates and 40 final detections. Dense-scene
 timing was not measured in this stationary comparison.
 
+## Replay and transport optimization follow-up
+
+After the per-frame trial, the owner requested increasing the remaining frame
+budget through optimization. A separate stationary maintenance comparison at
+`9fd1ec2a0e` measured 5,000 replays each with FP32 and FP16 output. The replay
+profiler runs afterward; its instrumented timings are excluded from latency
+samples. Both variants captured one graph, with no JIT input-buffer copy.
+Evidence is retained in `results-profile-before`.
+
+The original FP32 submission plus completion/readback measured 3.554 ms p50 /
+4.270 ms p99 / 4.920 ms maximum. FP16 transport measured 3.420 / 4.097 / 4.358 ms,
+but direct half-precision CPU decoding made the full pipeline slower at the
+median (4.058 versus 4.024 ms) and included an 18.313 ms total outlier. This does
+not establish the cause of that CPU delay or validate live FP16 activation.
+
+A proposed batched indirect-command write was withdrawn before device deployment.
+The existing compute-ring cache already skips identical words. Unconditional
+bulk writes would bypass that cache and could leave its view inconsistent with
+the shared hardware ring. The final runtime keeps the existing command writes,
+ordering, timeline waits and readback dependencies.
+
+Instead, `84d738b11a` caches the arguments of an already validated YOLO TinyJit
+replay while both the captured graph and exact immutable input UOp are unchanged.
+New allocations/views go through the normal JIT validation. This caches input
+metadata, not image pixels or inference results. CPU tests cover in-place pixel
+changes, new allocations, invalid views, reset and serialization; the cache is
+not serialized. JIT-disabled and nested-capture paths retain normal behavior.
+This is local to the YOLO helper; the driving TinyJit path is unchanged.
+
+The CPU worker also accepts compact FP16 transport and converts it to FP32 before
+filtering/NMS, outside the primary owner. The benchmark uses the same conversion.
+FP16 reduces the 2,688-anchor packet from 64,512 to 32,256 bytes without removing
+candidates. It quantizes coordinates/scores, so independent numerical checks
+still apply. No extra camera-image upload or resize is introduced.
+
+The repeated maintenance benchmark selected native FP16 after 5,000 samples
+per variant, using the same maximum-total-then-p99 criterion. Complete evidence
+is in `results-replay-optimized`.
+
+| Saved-input measurement | p50 ms | p99 ms | Maximum ms |
+| --- | ---: | ---: | ---: |
+| Original FP32 GPU submission + completion/readback | 3.554 | 4.270 | 4.920 |
+| Cached replay, FP32 GPU submission + completion/readback | 3.263 | 3.918 | 4.208 |
+| Cached replay, FP16 GPU submission + completion/readback | 3.126 | 3.788 | 4.039 |
+| Cached replay, FP16 total including CPU conversion/NMS | 3.582 | 4.253 | 4.541 |
+
+Changed allocations, in-place image mutation and serialized replay accepted the
+new inputs. Independent ONNX validation measured maximum FP16 box error 0.12497
+pixels and score error 0.000216; all ten relevant anchor classes agreed. The saved
+bicycle score was 0.8408203 versus the reference's 0.8407594. Both variants still
+used one graph with no JIT input copy. The focused suite passes 117 tests and
+Ruff passes all changed Python files.
+
+### Live optimized comparison
+
+The same guarded 30/180/30-second procedure passed at `84d738b11a` with native
+FP16 transport. The enabled window produced 2,037 results in 180.014 seconds,
+11.32 Hz, and observed 3,600 messages from the driving model and each camera.
+There were zero YOLO overruns and zero reported driving drops. This improved
+per-run cost, but did **not** demonstrate a result-rate increase over the earlier
+11.62 Hz trial. These are different sequential stationary windows, not a
+controlled interleaved comparison of camera-delivery jitter or thermal state.
+
+| Live measurement | Earlier FP32 p50 / p99 / max ms | Optimized p50 / p99 / max ms |
+| --- | ---: | ---: |
+| Submission + GPU completion/readback | 4.802 / 5.172 / 5.687 | 4.349 / 4.699 / 4.985 |
+| Full result pipeline | 8.730 / 21.180 / 28.697 | 7.941 / 22.694 / 70.179 |
+| CPU postprocessing, outside primary | 0.787 / 9.957 / 17.375 | 0.780 / 8.297 / 59.008 |
+
+For admitted frames, the median deadline budget before YOLO was 9.513 ms.
+Subtracting submission and readback left 5.201 ms median versus 4.778 ms earlier;
+this excludes the short nonblocking output handoff and is not a hard future
+bound. The reservation grew from 6.450 to 7.384 ms, versus 8.223 ms at the end of
+the earlier trial. Median headroom above the full reservation was 2.133 ms versus
+1.455 ms earlier. Guard multipliers and deadlines were not relaxed.
+
+One CPU postprocessing wall-time sample was 59.008 ms (result latency 70.179 ms).
+Its GPU submission/readback cost was only 4.368 ms. The corresponding driving
+frame and its neighbors had zero drops and about 49 ms publication gaps. Twelve
+results exceeded 30 ms overall; several involved delivery/scheduling wait rather
+than NMS. The exact cause of these CPU delays is not isolated, so this change
+must not be described as improving the full result pipeline's worst latency.
+
+Driving execution p50/p99/max was 36.418/37.989/38.515 ms baseline,
+36.263/38.129/42.690 ms enabled, and 36.048/37.597/38.076 ms recovery. Maximum
+primary publication gaps were 108.238/77.510/70.544 ms, with frame-ID delta one
+throughout. Baseline counts ranged from 598 to 600 (599 primary); its road-camera
+maximum capture gap was 97.146 ms. Enabled camera gaps were below 68.929 ms.
+Recovery received 600 messages on each primary/camera stream. Camera EOF to
+YOLO publication measured 92.345/110.605/152.951 ms p50/p99/max. Thermal status
+stayed green; the enabled phase's final hottest CPU reading was 55.6 C.
+
+Of 2,037 results, 2,007 contained 2,012 distinct detections and 30 were empty.
+There were 1,074 consecutive-frame result pairs. The CPU worker again ran on
+CPU 4 with ordinary scheduling and no GPU device descriptors. The supervisor
+resumed continuous stationary display. Complete samples and analysis remain in
+`live-reuse-optimized`; previous reports are retained separately.
+
 ## Recovery and validation limits
 
 The first recovery hit an operational issue: `restart.sh` begins with `git pull`,
