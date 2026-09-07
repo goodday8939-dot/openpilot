@@ -296,9 +296,13 @@ try:
     assert not managers(), 'old manager wrapper remains'
     assert not alive(old_model), 'old USB GPU owner remains'
     restore()
+    # The old process epoch includes the deliberate manager-stop gap. Do not
+    # let its frequency history suppress preparation of the new owner.
+    sm = messaging.SubMaster(required+['onroadEvents', 'carrotYolo'])
   deadline = time.monotonic()+180
   report['stage'] = 'waiting_prepared_owner'
   save()
+  last_preparation_report = 0.
   while time.monotonic() < deadline:
     sm.update(100)
     if parked():
@@ -309,6 +313,12 @@ try:
       lease_file.unlink(missing_ok=True)
     if restart is not None and restart.poll() is not None and restart.returncode:
       raise RuntimeError('normal restart launcher failed')
+    if camera_time()-last_preparation_report >= 5:
+      report['preparation'] = {'parked': parked(), 'alive': sm.alive.copy(), 'valid': sm.valid.copy(),
+                               'freq_ok': sm.freq_ok.copy(), 'seen': sm.seen.copy(),
+                               'usb_active': params.get_bool('UsbGpuActive'), 'yolo_state': str(sm['carrotYolo'].state)}
+      save()
+      last_preparation_report = camera_time()
     if permitted() and sm.updated['carrotYolo'] and sm['carrotYolo'].state == 'paused':
       break
   assert permitted() and sm['carrotYolo'].state == 'paused', 'prepared driving owner not observed'
