@@ -9,7 +9,7 @@ from tinygrad.engine.jit import GraphRunner, MultiGraphRunner
 from tinygrad.runtime.ops_rdma import RDMACopyQueue
 
 class HCQGraph(MultiGraphRunner):
-  # Opt-in for an independently submitted, compute-only USB AMD graph.
+  # Opt-in for an independently submitted, compute-only USB AMD or QCOM graph.
   # The normal multi-queue path remains the default for driving inference.
   single_queue = False
 
@@ -18,7 +18,9 @@ class HCQGraph(MultiGraphRunner):
     self.devices = list({cast(HCQCompiled, Device[b.device]) for (_,_,bufs,_) in self.calls for b in bufs})
     if self.single_queue:
       assert len(self.devices) == 1 and all(r is not None for r in self.runtimes), "single_queue requires one compute-only device"
-      assert self.devices[0].device.split(":")[0] == "AMD" and self.devices[0].is_usb(), "single_queue requires USB AMD"
+      dev = self.devices[0]
+      assert dev.device.split(":")[0] == "QCOM" or (dev.device.split(":")[0] == "AMD" and dev.is_usb()), \
+        "single_queue requires QCOM or USB AMD"
 
     # CPU Device is always last
     self.devices = sorted(self.devices, key=lambda x: 1 if x._is_cpu() else 0)

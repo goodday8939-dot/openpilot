@@ -23,11 +23,15 @@ view into 512 x 256 RGB. For a 1344 x 760 camera the content is 453 x 256 with
 horizontal padding. The inverse letterbox transform maps boxes to the original
 camera. COCO classes, confidence 0.35, bounded NMS, and web expiry are unchanged.
 
-The manager gate requires onroad, `UsbGpuActive`, no `UsbGpuLoading`, existing
+The legacy manager gate requires onroad, `UsbGpuActive`, no `UsbGpuLoading`, existing
 `DisableDM` value 1 or 2, a compiled `yolo_qcom.pkl`, and an explicit local
 `/data/egpu_yolo/qcom_enabled` commissioning marker. The worker additionally
 requires fresh driving/manager/device messages and confirms both DM processes
-are stopped before submitting work. No DM setting is changed by YOLO.
+are stopped before submitting work. That marker remains absent: a cold launch
+is now rejected, and commissioning supplies a bundle already warmed in the same
+process while cameras were stopped. Automatic cold-start commissioning is not
+enabled. The Web-display commissioning entry also requires fresh Park/standstill
+state. No DM setting is changed by YOLO.
 The test vehicle already had `DisableDM=2`, with both DM processes stopped.
 
 Mode changes revoke new submissions and suppress late results. They do not
@@ -35,7 +39,7 @@ preempt an in-flight GPU kernel. QCOM still serves the driving image warp and
 UI, and must take over driving inference if the eGPU fails. Therefore process
 separation is not a guarantee of timing isolation. Compilation and live A/B
 tests are required before creating the commissioning marker. A runtime above
-100 ms or an execution error writes `qcom_fault`, preventing manager restarts
+250 ms or an execution error writes `qcom_fault`, preventing manager restarts
 from repeatedly resubmitting failing optional work.
 
 `qcom_yolo_prepare.py` compiles from a saved NV12 frame while offroad, with
@@ -89,10 +93,11 @@ sample does not validate running YOLO alongside driving.
 
 The owner subsequently made 40 ms an optimization target rather than a hard
 acceptance ceiling, authorized some numerical precision loss, and requested
-that 512 x 256 resolution be preserved. The worker's 100 ms overrun guard stops
-subsequent submissions; it cannot cancel an in-flight kernel. The commissioning
+that 512 x 256 resolution be preserved. The cooperative worker's 250 ms total
+frame limit is checked before each batch and after completion. It cannot cancel
+an in-flight kernel. The commissioning
 marker remains absent pending a camera/driving latency comparison. Neither
-40 ms nor 100 ms establishes isolation from the driving camera pipeline.
+40 ms nor 250 ms establishes isolation from the driving camera pipeline.
 
 ### Fixed-resolution optimization and quantization
 
@@ -170,6 +175,51 @@ available. The owner then requested stopping the processes remotely while
 leaving ignition on; the explicit stationary-maintenance path keeps the camera
 stop requirement and adds stopped-control and live Park-state checks.
 No commissioning marker was created by any saved-frame trial.
+
+Production preparation then completed with ignition ON, cameras/inference/UI
+and control processes stopped by the temporary maintenance manager, and live
+Park/standstill monitoring. With CPU 4 available, 60 runs measured 62.95 ms p50,
+63.31 ms p95, 63.35 ms p99 and 63.36 ms maximum. Serialization and independent
+ONNX Runtime comparison passed (maximum box/score error 0.00481, three relevant
+anchors with matching classes). The normal manager was restored automatically.
+The subsequent read-only camera sample measured approximately 20 Hz on all
+three camera services, no displayed camera alert, and a final driving-model
+sample of 36.96 ms with zero reported drops. This recovery check precedes the
+separate live-camera A/B test and does not establish isolation on its own.
+
+### First-call preparation and cooperative live execution
+
+A cold live-camera invocation took 3.289 seconds and triggered the primary
+latency guard. Preparing the same process with cameras stopped isolated
+1.458 seconds of first-call graph/submission setup, followed by 61.91 ms of
+GPU wait/readback. Subsequent saved-frame runs including input upload took
+68.32-68.40 ms. A warmed but unsliced live graph completed eight 74-80 ms
+detections before primary execution reached 60.10 ms; it was not accepted.
+
+Fixed eight-kernel batches made one live frame take 211.62 ms. Batches formed
+from measured kernel costs (8 ms target) reduced the graph to nine batches;
+the first such trial completed 137 detections before a primary-latency stop.
+The QCOM-only graph was then changed to use a single compute queue without
+the generic CPU kickoff/reset handshake. Normal driving graphs retain their
+existing factory and synchronization. Each YOLO batch completes and briefly
+yields before the next; an admission callback can cancel the remaining batches
+when eGPU/DM/state conditions change or primary execution/drop limits fail.
+
+The single-queue, nine-batch candidate completed 172 live-camera detections
+over its 45-second trial without triggering the observer. Driving execution
+was 36.48 / 38.72 / 39.57 ms before, 36.44 / 44.34 / 46.65 ms enabled and
+35.94 / 38.10 / 39.60 ms after (p50/p99/max). Camera-EOF-to-model-event latency
+was 81.78 / 95.51 / 115.03 ms before and 85.40 / 111.20 / 121.64 ms enabled.
+The increased tail latency is retained in the record; this short stationary
+trial does not establish zero impact or moving-vehicle suitability.
+
+`qcom_yolo_cooperative_prepare.py` converts the verified unsliced artifact
+under the same maintenance guards, profiles its kernels, preserves order while
+partitioning, and verifies bit-exact output and serialization. Version 2 records
+the cooperative runtime fingerprint. `qcom_yolod.main(prepared_bundle=...,
+commissioning=True)` accepts only matching graphs that have already executed
+in that process. It publishes to the existing Web overlay; a standalone cold
+worker is deliberately refused. Final output older than 350 ms is suppressed.
 
 ## Historical shared-eGPU execution and image coordinates
 

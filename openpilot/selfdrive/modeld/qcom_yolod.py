@@ -15,9 +15,9 @@ from openpilot.selfdrive.modeld.qcom_yolo_model import BACKEND, camera_transform
 DIRECTORY = Path('/data/egpu_yolo')
 INTERVAL = .25
 MAX_FRAME_AGE = .2
-# 40 ms is the optimization target. A slower candidate still needs live A/B
-# commissioning; this limit only stops subsequent submissions after an overrun.
-MAX_RUNTIME = .1
+# 40 ms is the optimization target. Cooperative batches yield to driving/UI;
+# this total frame limit also gets checked before each new batch submission.
+MAX_RUNTIME = .25
 
 
 def permit_reason(*, onroad, egpu_active, loading, dm_disabled, dm_running, model_alive, manager_alive):
@@ -39,7 +39,7 @@ def configured(params, directory=DIRECTORY):
           and not (directory / 'qcom_fault').exists())
 
 
-def main():
+def main(prepared_bundle=None, commissioning=False):
   try:
     configure_environment(DIRECTORY)
   except (OSError, ValueError) as exc:
@@ -48,7 +48,7 @@ def main():
   from openpilot.cereal import messaging
   from openpilot.common.params import Params
   from openpilot.common.swaglog import cloudlog
-  from openpilot.selfdrive.modeld.helpers import load_oob
+  from openpilot.selfdrive.modeld.qcom_yolo_runtime import YoloInterrupted, configure_runtime, is_prepared
   from msgq.visionipc import VisionIpcClient, VisionStreamType
   from tinygrad import Tensor
 
@@ -57,17 +57,22 @@ def main():
   os.sched_setaffinity(0, {4})
   os.nice(10)
   params = Params()
-  sm = messaging.SubMaster(['modelV2', 'managerState', 'deviceState'])
+  sm = messaging.SubMaster(['modelV2', 'managerState', 'deviceState'] + (['carState'] if commissioning else []),
+                          ignore_avg_freq=['carState'] if commissioning else [])
   pm = messaging.PubMaster(['carrotYolo'])
   client = VisionIpcClient('camerad', VisionStreamType.VISION_STREAM_ROAD, True)
-  bundle = None
+  bundle = prepared_bundle
   runs = skipped = 0
   last_run = -float('inf')
   last_status = -float('inf')
   failed = False
+  frame_start = None
 
   def reason():
     sm.update(0)
+    if commissioning and (not sm.all_checks(['carState']) or not sm['carState'].standstill
+                          or abs(sm['carState'].vEgo) >= .01 or str(sm['carState'].gearShifter) != 'park'):
+      return 'stopped'
     dm_running = any(p.running and p.name in ('dmonitoringmodeld', 'dmonitoringd') for p in sm['managerState'].processes)
     return permit_reason(onroad=params.get_bool('IsOnroad') and sm['deviceState'].started,
                          egpu_active=params.get_bool('UsbGpuActive'), loading=params.get_bool('UsbGpuLoading'),
@@ -83,8 +88,26 @@ def main():
     pm.send('carrotYolo', msg)
     last_status = time.monotonic()
 
+  def requested():
+    return (commissioning and not (DIRECTORY / 'qcom_fault').exists()) or configured(params)
+
+  def admission():
+    if not requested() or reason() != 'run':
+      return False
+    if sm['modelV2'].modelExecutionTime > .06 or sm['modelV2'].frameDropPerc > 1:
+      raise RuntimeError('driving latency/drop guard exceeded during optional YOLO')
+    if frame_start is not None and camera_time() - frame_start > MAX_RUNTIME:
+      raise RuntimeError('cooperative YOLO frame exceeded runtime budget')
+    return True
+
   try:
-    while configured(params):
+    expected = hashlib.sha256(Path(__file__).with_name('qcom_yolo_model.py').read_bytes()).hexdigest()
+    runtime_hash = hashlib.sha256(Path(__file__).with_name('qcom_yolo_runtime.py').read_bytes()).hexdigest()
+    if (bundle is None or bundle['version'] != 2 or bundle['device'] != BACKEND or bundle['adapter_sha256'] != expected
+        or bundle.get('runtime_sha256') != runtime_hash or not bundle.get('cooperative') or not is_prepared(bundle['run'])):
+      raise ValueError('internal YOLO requires verified maintenance prewarm in this process')
+    configure_runtime(admission)
+    while requested():
       state = reason()
       now = time.monotonic()
       if state != 'run':
@@ -95,12 +118,6 @@ def main():
       if now - last_run < INTERVAL:
         time.sleep(.01)
         continue
-      if bundle is None:
-        with (DIRECTORY / 'yolo_qcom.pkl').open('rb') as f:
-          bundle = load_oob(f)
-        expected = hashlib.sha256(Path(__file__).with_name('qcom_yolo_model.py').read_bytes()).hexdigest()
-        if bundle['version'] != 1 or bundle['device'] != BACKEND or bundle['adapter_sha256'] != expected:
-          raise ValueError('internal YOLO artifact mismatch')
       if not client.is_connected() and not client.connect(False):
         time.sleep(.1)
         continue
@@ -120,11 +137,18 @@ def main():
       pixels = np.frombuffer(buf.data, dtype=np.uint8).copy()
       if pixels.size != size:
         raise ValueError('unexpected camera buffer length')
-      if not configured(params) or reason() != 'run':
+      if not requested() or reason() != 'run':
         continue
       last_run = time.monotonic()
-      tensor = Tensor(pixels, device='QCOM').realize()
-      raw = bundle['run'](tensor).numpy()
+      frame_start = start
+      try:
+        tensor = Tensor(pixels, device='QCOM').realize()
+        raw = bundle['run'](tensor).numpy()
+      except YoloInterrupted:
+        skipped += 1
+        continue
+      finally:
+        frame_start = None
       detections = decode_detections(raw, bundle['width'], bundle['height'], compact=True)
       for detection in detections:
         detection['label'] = bundle['names'][detection['classId']]
@@ -136,7 +160,7 @@ def main():
         raise RuntimeError(f'internal YOLO exceeded {MAX_RUNTIME}s: {elapsed:.4f}s')
       # A mode transition revokes new work and suppresses obsolete results.
       # Already submitted GPU work is not claimed to be preemptible.
-      if not configured(params) or reason() != 'run':
+      if not requested() or reason() != 'run' or camera_time() - eof / 1e9 > .35:
         continue
       publish('run', frameId=frame_id, timestampSof=sof, timestampEof=eof, executionTime=elapsed,
               cameraWidth=cw, cameraHeight=ch, detections=detections)
