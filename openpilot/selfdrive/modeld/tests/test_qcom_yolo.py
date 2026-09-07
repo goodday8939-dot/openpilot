@@ -81,11 +81,12 @@ def test_internal_worker_stays_disabled_until_commissioned_and_fault_latches(tmp
   assert not configured(params, tmp_path)
 
 
-def test_letterbox_retains_complete_camera_and_inverts_content_bounds():
-  width, height, left, top = letterbox_geometry((1344, 760), (512, 256))
-  assert (width, height, left, top) == (453, 256, 29, 0)
+@pytest.mark.parametrize('model_size,content', [((512, 256), (453, 256, 29, 0)), ((640, 384), (640, 362, 0, 11))])
+def test_letterbox_retains_complete_camera_and_inverts_content_bounds(model_size, content):
+  width, height, left, top = letterbox_geometry((1344, 760), model_size)
+  assert (width, height, left, top) == content
   points = np.array([[left, top, 1], [left + width, top + height, 1]])
-  actual = points @ camera_transform((1344, 760), (512, 256)).T
+  actual = points @ camera_transform((1344, 760), model_size).T
   np.testing.assert_allclose(actual, [[0, 0, 1], [1344, 760, 1]], atol=1e-4)
   with pytest.raises(ValueError):
     letterbox_geometry((0, 760), (512, 256))

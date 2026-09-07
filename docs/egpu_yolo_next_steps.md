@@ -1,12 +1,32 @@
 # YOLO continuation plan
 
-Continue on `carrot-egpu-yolo`, the explicitly separate feature experiment
+Continue on the owner-requested `carrot-egpu-yolo2`, branched from
+`carrot-egpu-yolo` at `1310ed43fe`. This remains a separate feature experiment
 based on `carrot-cinque-terre`. Do not activate these features on the three
 maintained model branches. The owner approved the following five stages.
 The present outputs are observational; automatic vehicle control is not
 validated or enabled by this plan.
 
 ## Current baseline
+
+The follow-up has completed the initial 640 x 384 saved-input eGPU measurement
+and independent numerical check. See [eGPU timing](egpu_yolo2_timing.md).
+Its 5,000 resident-input runs took 5.45 ms p50 / 6.24 ms p99 / 7.39 ms maximum,
+but uploading the original padded NV12 frame at 5 Hz took the total to
+31.73 / 33.67 / 33.95 ms. The original input upload alone took 25.99 ms median.
+This does not establish admission alongside live driving. The owner then
+prioritized reusing the already-resident driving image for minimum latency,
+explicitly accepting bicycle misses. Additional full-camera upload and the
+higher-resolution input are no longer the immediate implementation target.
+The same-frame 512 x 256 comparison took 3.64 ms resident-input median and
+29.74 ms with original-buffer upload. Both trials passed serialization and
+independent ONNX checks. Each has 5,000 resident runs and 300 uploads at 5 Hz;
+neither measures live driving concurrency or a controlled thermal A/B.
+
+The last internal-GPU continuous-display attempt had already stopped before
+the follow-up: 421 results, then a 150.47 ms model-publication gap with frame-ID
+delta 3 on the non-conflating observer. Its root cause remains unisolated.
+There is currently no YOLO display worker or automatic activation marker.
 
 See `egpu_yolo_experiment.md` for measurements and numerical checks.
 The internal-GPU artifact uses YOLOv8n COCO FP32 at 512 x 256, confidence
@@ -66,15 +86,27 @@ The 640 x 384 result also contained a motorcycle classification at 0.4696
 over the same bicycles. This is one-scene evidence, not a general accuracy
 benchmark. The crop was selected after looking at the image; it does not
 validate automatic region selection. CPU preprocessing differs slightly from
-the live NV12 kernel, explaining the different low-resolution scores. No
-higher-resolution model has been compiled or timed on the vehicle yet.
+the live NV12 kernel, explaining the different low-resolution scores. The later
+640 x 384 eGPU benchmark uses matching full-camera NV12 preprocessing and
+does not use the historical driving-warp input.
 The workstation now has a static 640 x 384 ONNX candidate (12,756,343 bytes),
 SHA-256 `e02d75ddde2a1792e0275af57e3c23dd8dc307aa64a6c2f86c8f1889618d7f76`.
 Its three random-input comparisons against PyTorch passed with maximum
-absolute errors below 0.00087. It remains a local candidate; the generated
-manifest's prospective NAS URL has not been published or installed.
+absolute errors below 0.00087. The verified file was copied into a separate
+vehicle benchmark directory. Its prospective NAS URL is still unpublished,
+and neither live runtime has been switched to the 640 x 384 artifact.
 
 ## 1. Stabilize eGPU latency without shrinking resolution
+
+The latest instruction is to reuse the native 512 x 256 driving `img_q` and
+minimize execution time, even if bicycle detection fails. Do not add a second
+full-camera USB transfer to recover those detections. A fresh same-frame CPU
+reconstruction using current driving calibration scored the bicycle 0.841 in
+the driving warp, 0.024 in full-view 512 x 256 and 0.638 in full-view 640 x 384.
+The narrower driving field of view retains more object pixels in this scene;
+these are CPU/ONNX comparisons, not reads of the live eGPU queue. Reusing the
+queue needs current-buffer ownership, timing guards and its own sustained
+primary-latency comparison before reactivating the retired execution path.
 
 Use 512 x 256 as the timing baseline, and evaluate 640 x 384 or a justified
 region strategy as an accuracy candidate given the bicycle miss. Do not reduce

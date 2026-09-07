@@ -1,5 +1,10 @@
 # eGPU YOLO experiment
 
+Follow-up measurements now use the owner-requested `carrot-egpu-yolo2` branch,
+continuing this experiment at `1310ed43fe`. See
+[640 x 384 eGPU timing](egpu_yolo2_timing.md) for the saved full-camera benchmark,
+USB upload cost, numerical checks and remaining live-validation work.
+
 `carrot-egpu-yolo` is a separate feature experiment based on `carrot-cinque-terre`
 at `90696ca69ae9a2325cb901cffb335ff45b95c0a7`. The Cinque Terre driving model and
 its NAS manifest are unchanged. This experiment is intentionally not enabled
