@@ -56,6 +56,14 @@ def test_timestamp_discontinuity_and_drops_require_new_stable_cadence():
   assert budget.settled == 0
 
 
+def test_camera_clock_includes_suspended_time(monkeypatch):
+  from openpilot.selfdrive.modeld import egpu_yolo
+  monkeypatch.setattr(egpu_yolo.time, "CLOCK_BOOTTIME", 7, raising=False)
+  monkeypatch.setattr(egpu_yolo.time, "clock_gettime", lambda clock: 105.0 if clock == 7 else 100.0, raising=False)
+  monkeypatch.setattr(egpu_yolo.time, "monotonic", lambda: 100.0)
+  assert egpu_yolo.camera_time() == 105.0
+
+
 def test_nms_keeps_different_classes_and_bounds_coordinates():
   raw = np.zeros((1, 6, 4), dtype=np.float32)
   raw[0, :4, :] = np.array([[100, 50, 100, 60], [102, 50, 100, 60], [100, 50, 100, 60], [-1, 5, 10, 10]]).T

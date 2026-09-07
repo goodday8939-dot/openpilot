@@ -24,7 +24,7 @@ from openpilot.selfdrive.modeld.compile_modeld import make_input_queues, WARP_IN
 from openpilot.selfdrive.modeld.fill_model_msg import fill_model_msg, fill_driving_model_data, fill_pose_msg, PublishState
 from openpilot.common.file_chunker import open_file_chunked
 from openpilot.selfdrive.modeld.constants import ModelConstants, Plan
-from openpilot.selfdrive.modeld.egpu_yolo import YoloRuntime
+from openpilot.selfdrive.modeld.egpu_yolo import YoloRuntime, camera_time
 from openpilot.selfdrive.modeld.helpers import (get_tg_input_devices, load_oob, modeld_pkl_path,
                                                 refresh_usbgpu_device_cache, select_vision_streams, usbgpu_compiled_path,
                                                 usbgpu_pcie_not_ready, usbgpu_present, wait_for_usbgpu_present)
@@ -404,7 +404,7 @@ def main(demo=False):
       cloudlog.debug("vipc_client_main no frame")
       continue
 
-    yolo_frame_received = time.monotonic()
+    yolo_frame_received = camera_time()
 
     if use_extra_client:
       # Keep receiving extra frames until frame id matches main camera
@@ -563,7 +563,7 @@ def main(demo=False):
       if model.yolo is not None:
         try:
           model.yolo.after_publish(pm, meta_main.frame_id, meta_main.timestamp_sof, meta_main.timestamp_eof,
-                                   yolo_frame_received, time.monotonic(), prepare_only,
+                                   yolo_frame_received, camera_time(), prepare_only,
                                    "wideRoad" if main_wide_camera else "road", model_transform_main,
                                    (vipc_client_main.width, vipc_client_main.height))
         except Exception:

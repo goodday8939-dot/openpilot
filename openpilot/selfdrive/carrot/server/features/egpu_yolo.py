@@ -3,12 +3,11 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import time
 from pathlib import Path
 
 from aiohttp import web
 
-from openpilot.selfdrive.modeld.egpu_yolo import artifact_path
+from openpilot.selfdrive.modeld.egpu_yolo import artifact_path, camera_time
 
 STATE = web.AppKey("egpu_yolo_state", dict)
 
@@ -23,7 +22,7 @@ async def collector(app: web.Application):
       if event is not None:
         data = event.carrotYolo.to_dict()
         state["status"] = {k: v for k, v in data.items() if k != "detections"}
-        state["received"] = time.monotonic()
+        state["received"] = camera_time()
         if event.valid:
           state["frame"] = data
       await asyncio.sleep(0.05)
@@ -52,7 +51,7 @@ def status_payload(state: dict, directory: Path, now: float) -> dict:
 
 
 async def api_status(request: web.Request):
-  return web.json_response(status_payload(request.app[STATE], artifact_path().parent, time.monotonic()),
+  return web.json_response(status_payload(request.app[STATE], artifact_path().parent, camera_time()),
                            headers={"Cache-Control": "no-store"})
 
 

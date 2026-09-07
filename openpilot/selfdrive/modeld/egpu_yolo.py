@@ -22,6 +22,11 @@ MAX_DETECTIONS = 40
 MAX_CANDIDATES = 200
 
 
+def camera_time() -> float:
+  """Camera/cereal timestamps use CLOCK_BOOTTIME, including suspended time."""
+  return time.clock_gettime(time.CLOCK_BOOTTIME) if hasattr(time, "CLOCK_BOOTTIME") else time.monotonic()
+
+
 def artifact_path() -> Path:
   return Path(os.getenv("EGPU_YOLO_DIR", "/data/egpu_yolo")) / "yolo.pkl"
 
@@ -194,7 +199,7 @@ class YoloRuntime:
                     driving_published: float, dropped: bool, camera: str, transform: np.ndarray, camera_size: tuple[int, int]):
     from openpilot.cereal import messaging
     self.budget.observe(frame_id, sof_ns / 1e9, received, dropped)
-    start = time.monotonic()
+    start = camera_time()
     reason = self.budget.admit(start)
     detections = []
     if reason == "run":
@@ -205,7 +210,7 @@ class YoloRuntime:
         cloudlog.exception("optional YOLO failed; disabling it for this modeld session")
         self.budget.disabled_reason = "error"
         reason = "error"
-      self.last_execution = time.monotonic() - start
+      self.last_execution = camera_time() - start
     elif start - self.last_publish < 1.0:
       return
     msg = messaging.new_message("carrotYolo")
@@ -219,6 +224,6 @@ class YoloRuntime:
       "cameraWidth": camera_size[0], "cameraHeight": camera_size[1], "detections": detections,
     }
     pm.send("carrotYolo", msg)
-    self.last_publish = time.monotonic()
+    self.last_publish = camera_time()
     if reason == "run":
       self.budget.finish(start, self.last_publish)

@@ -31,6 +31,8 @@ use frame IDs when available, otherwise a bounded latest-result fallback.
 ## Admission
 
 Twenty consecutive camera frames establish cadence. The next arrival deadline
+and web result expiry use the camera's CLOCK_BOOTTIME domain, including suspend.
+The deadline
 uses the earliest observed SOF-to-receive offset over 120 frames, capped by
 receive time plus 50 ms. A late receive does not grant another free 50 ms.
 Frame gaps, timestamp jumps, and dropped frames restart settling.
