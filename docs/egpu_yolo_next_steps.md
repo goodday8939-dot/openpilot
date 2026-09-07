@@ -39,11 +39,12 @@ its latch on a new recovery generation, retaining its worst-time reservation
 and cumulative overrun count. Failed GPU calls remain quarantined until a
 different normal model owner starts; restarting a shared GPU in traffic is not
 a recovery technique. A dead CPU-only decoder is restarted independently on
-CPU4 with bounded backoff and a nonblocking handoff; modeld skips optional GPU
+CPU4 with bounded backoff and a nonblocking handoff (CPUs0-3 if offroad power
+saving has offlined CPU4); modeld skips optional GPU
 work while it is unavailable. Persistent GPU timing that cannot fit the budget
 still cannot be admitted merely because recovery was requested.
 
-154 focused tests cover repeated ignition cycles, supervisor-before/after-model
+155 focused tests cover repeated ignition cycles, supervisor-before/after-model
 startup ordering, stale-boot and wrong-owner leases, moving/engaged gates,
 continuous-health recovery, bounded repeated backoff without permanent exit,
 GPU-error quarantine, preserved budget and nonblocking CPU-worker replacement.

@@ -1,11 +1,24 @@
 """Bounded CPU-only delivery for the driving owner's resident YOLO output."""
 import os
+import errno
 import pickle
 import socket
 import subprocess
 import sys
 import threading
 import time
+
+
+def cpu_worker_scheduler():
+  os.sched_setscheduler(0, os.SCHED_OTHER, os.sched_param(0))
+  try:
+    os.sched_setaffinity(0, {4})
+  except OSError as exc:
+    # Offroad power saving may offline the entire big CPU cluster. A decoder
+    # test/restart must remain CPU-only and usable until that cluster returns.
+    if exc.errno != errno.EINVAL:
+      raise
+    os.sched_setaffinity(0, {0, 1, 2, 3})
 
 
 class OutputWorker:
@@ -29,8 +42,7 @@ class OutputWorker:
   def _watch(self):
     # Only the CPU decoder is replaced. Never fork/reload the GPU owner from a
     # recovery attempt, and never make the primary thread wait for this lock.
-    os.sched_setscheduler(0, os.SCHED_OTHER, os.sched_param(0))
-    os.sched_setaffinity(0, {4})
+    cpu_worker_scheduler()
     failures = 0
     healthy_since = time.monotonic()
     while True:
@@ -121,8 +133,7 @@ def decode_packet(packet):
 def main():
   # Reset inherited FIFO/CPU-7 policy before importing NumPy or cereal. This
   # process never imports tinygrad, opens an image buffer or owns a GPU device.
-  os.sched_setscheduler(0, os.SCHED_OTHER, os.sched_param(0))
-  os.sched_setaffinity(0, {4})
+  cpu_worker_scheduler()
   from openpilot.cereal import messaging
   from openpilot.selfdrive.modeld.egpu_yolo import camera_time
   from openpilot.selfdrive.modeld.egpu_yolo_reuse import read_session

@@ -133,6 +133,24 @@ def test_output_recovery_never_blocks_primary_on_spawn_or_exited_worker():
     worker.lock.release()
 
 
+def test_cpu_worker_survives_offroad_big_core_power_down(monkeypatch):
+  import errno
+  from openpilot.selfdrive.modeld import egpu_yolo_postprocess as module
+  calls = []
+  monkeypatch.setattr(module.os, 'SCHED_OTHER', 0, raising=False)
+  monkeypatch.setattr(module.os, 'sched_param', lambda value: value, raising=False)
+  monkeypatch.setattr(module.os, 'sched_setscheduler', lambda *args: None, raising=False)
+
+  def affinity(pid, cores):
+    calls.append(cores)
+    if cores == {4}:
+      raise OSError(errno.EINVAL, 'CPU offline')
+
+  monkeypatch.setattr(module.os, 'sched_setaffinity', affinity, raising=False)
+  module.cpu_worker_scheduler()
+  assert calls == [{4}, {0, 1, 2, 3}]
+
+
 @pytest.mark.parametrize('owner,lease_enabled,latch,expected_calls', [
   (-1, True, 'overrun', 0), (os.getpid(), False, 'overrun', 0),
   (os.getpid(), True, 'error', 0), (os.getpid(), True, 'overrun', 1),
