@@ -219,7 +219,33 @@ struct CarrotNaviMedia @0xf35cc4560bbf6ec2 {
 	payload @14 :Data;
 }
 
-struct CustomReserved3 @0xda96579883444c35 {
+struct CarrotYolo @0xda96579883444c35 {
+  frameId @0 :UInt32;
+  timestampSof @1 :UInt64;
+  timestampEof @2 :UInt64;
+  modelId @3 :Text;
+  camera @4 :Text;
+  state @5 :Text;
+  executionTime @6 :Float32;
+  budgetTime @7 :Float32;
+  drivingPublishTime @8 :UInt64;
+  drivingLatency @9 :Float32;
+  runs @10 :UInt32;
+  skipped @11 :UInt32;
+  overruns @12 :UInt32;
+  cameraWidth @13 :UInt16;
+  cameraHeight @14 :UInt16;
+  detections @15 :List(Detection);
+  struct Detection {
+    classId @0 :UInt16;
+    label @1 :Text;
+    confidence @2 :Float32;
+    x1 @3 :Float32;
+    y1 @4 :Float32;
+    x2 @5 :Float32;
+    y2 @6 :Float32;
+    cameraPoints @7 :List(Float32);
+  }
 }
 
 struct CustomReserved4 @0x80ae746ee2596b11 {

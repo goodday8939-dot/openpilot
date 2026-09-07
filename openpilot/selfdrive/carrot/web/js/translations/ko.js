@@ -5,6 +5,13 @@ window.CarrotTranslations.register("ko", {
   nativeName: "한국어",
   shortName: "KO",
   strings: {
+    egpu_yolo_waiting: "대기",
+    egpu_yolo_not_prepared: "모델 설치 대기",
+    egpu_yolo_downloaded: "설치 완료 · 컴파일 대기",
+    egpu_yolo_ready: "시동 대기",
+    egpu_yolo_warming: "주행 주기 확인 중",
+    egpu_yolo_error: "오류 · 중지",
+    egpu_yolo_overrun: "시간 초과 · 중지",
     egpu_model_title: "eGPU 빅모델",
     egpu_model_checking: "모델 확인 중",
     egpu_model_downloading: "다운로드 중",

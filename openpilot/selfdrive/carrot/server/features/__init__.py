@@ -5,6 +5,7 @@ from . import (
   cars,
   dashcam,
   egpu_model,
+  egpu_yolo,
   intro,
   mapbox_tokens,
   params,
@@ -49,6 +50,7 @@ def register_all(app: web.Application) -> None:
   terminal.register(app)
   dashcam.register(app)
   egpu_model.register(app)
+  egpu_yolo.register(app)
   screenrecord.register(app)
   tools.register(app)
   xiaoge.register(app)

@@ -1,4 +1,5 @@
 import contentCatalogSource from "../features/drive/core/content_catalog.json";
+import { installEgpuYoloOverlay } from "../features/drive/contents/vision/egpu_yolo.js";
 import { installDriveContentFacade } from "../features/drive/core/content.js";
 import {
   createDriveLayoutSpec,
@@ -39,6 +40,7 @@ installDriveLayoutSpecFacade(layoutSpec, target);
 // Leaf renderers must exist before the remaining synchronous runtime scripts
 // evaluate. Runtime/content factories are finalized once those scripts finish.
 installDriveVisionLeafFacades(target);
+installEgpuYoloOverlay(target);
 installCarrotNaviModuleGlobals(target);
 
 let finalized = false;

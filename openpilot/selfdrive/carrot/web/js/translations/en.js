@@ -5,6 +5,13 @@ window.CarrotTranslations.register("en", {
   nativeName: "English",
   shortName: "EN",
   strings: {
+    egpu_yolo_waiting: "Waiting",
+    egpu_yolo_not_prepared: "Awaiting model",
+    egpu_yolo_downloaded: "Installed · awaiting compilation",
+    egpu_yolo_ready: "Awaiting ignition",
+    egpu_yolo_warming: "Learning frame cadence",
+    egpu_yolo_error: "Error · stopped",
+    egpu_yolo_overrun: "Overrun · stopped",
     egpu_model_title: "eGPU big model",
     egpu_model_checking: "Checking model",
     egpu_model_downloading: "Downloading",

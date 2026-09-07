@@ -5,6 +5,13 @@ window.CarrotTranslations.register("zh", {
   nativeName: "中文",
   shortName: "ZH",
   strings: {
+    egpu_yolo_waiting: "等待中",
+    egpu_yolo_not_prepared: "等待模型安装",
+    egpu_yolo_downloaded: "已安装 · 等待编译",
+    egpu_yolo_ready: "等待点火",
+    egpu_yolo_warming: "确认帧周期",
+    egpu_yolo_error: "错误 · 已停止",
+    egpu_yolo_overrun: "超时 · 已停止",
     egpu_model_title: "eGPU 大模型",
     egpu_model_checking: "正在检查模型",
     egpu_model_downloading: "正在下载",
