@@ -38,7 +38,7 @@ def configured(params, directory=DIRECTORY):
 
 
 def main():
-  os.environ.update(DEV='QCOM', FLOAT16='1', IMAGE='1', NOLOCALS='1', JIT_BATCH_SIZE='0', OPENPILOT_HACKS='1')
+  os.environ.update(DEV='QCOM', FLOAT16='1', IMAGE='0', NOLOCALS='1', JIT_BATCH_SIZE='0', OPENPILOT_HACKS='1', QCOM_PRIORITY='15')
   from openpilot.cereal import messaging
   from openpilot.common.params import Params
   from openpilot.common.swaglog import cloudlog

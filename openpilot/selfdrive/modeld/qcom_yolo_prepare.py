@@ -13,17 +13,18 @@ import numpy as np
 
 
 def compile_model(directory, input_nv12, camera_size, samples=60):
-  os.environ.update(DEV='QCOM', WARP_DEV='QCOM', IMAGE='1', FLOAT16='1', NOLOCALS='1',
+  os.environ.update(DEV='QCOM', WARP_DEV='QCOM', IMAGE='0', FLOAT16='1', NOLOCALS='1',
                     JIT_BATCH_SIZE='0', OPENPILOT_HACKS='1')
   from openpilot.cereal import messaging
   from openpilot.common.params import Params
   from openpilot.selfdrive.modeld.egpu_yolo import decode_detections
-  from openpilot.selfdrive.modeld.qcom_yolo_model import make_runner
+  from openpilot.selfdrive.modeld.qcom_yolo_model import configure_compiler, make_runner
   from openpilot.system.camerad.cameras.nv12_info import get_nv12_info
   from openpilot.selfdrive.modeld.helpers import dump_oob, load_oob
   import openpilot.selfdrive.modeld.compile_modeld  # noqa: F401 -- serialization support
   from tinygrad import Tensor, TinyJit
   from tinygrad.nn.onnx import OnnxRunner
+  configure_compiler()
 
   sm = messaging.SubMaster(['managerState'])
   deadline = time.monotonic() + 5

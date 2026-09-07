@@ -1,8 +1,24 @@
 import numpy as np
 import pytest
 
-from openpilot.selfdrive.modeld.qcom_yolo_model import camera_transform, letterbox_geometry, nv12_to_rgb
+from openpilot.selfdrive.modeld.qcom_yolo_model import camera_transform, letterbox_geometry, local_size_for, nv12_to_rgb
 from openpilot.selfdrive.modeld.qcom_yolod import configured, permit_reason
+
+
+@pytest.mark.parametrize('global_size', [(131072, 1, 1), (16, 8, 16), (3, 7, 11), (1, 1, 1), (12, 32, 64)])
+def test_workgroups_fit_hardware_budget_and_divide_global_size(global_size):
+  local = local_size_for(global_size)
+  assert 1 <= np.prod(local) <= 64
+  assert all(g % l == 0 for g, l in zip(global_size, local, strict=True))
+
+
+def test_compiler_matcher_is_compatible_with_tinygrad_and_leaves_cpu_alone(monkeypatch):
+  from tinygrad import Tensor
+  from tinygrad.engine import realize
+  from openpilot.selfdrive.modeld.qcom_yolo_model import configure_compiler
+  monkeypatch.setattr(realize, 'pm_optimize_local_size', realize.pm_optimize_local_size)
+  configure_compiler()
+  np.testing.assert_array_equal((Tensor([1, 2, 3]) + 7).numpy(), [8, 9, 10])
 
 
 @pytest.mark.parametrize('change,expected', [

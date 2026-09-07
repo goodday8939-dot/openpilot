@@ -15,7 +15,9 @@ USB helper modules remain available for reproducing the recorded experiment.
 
 `qcom_yolod` owns the observational publisher in a separate process. It uses
 the internal QCOM GPU, ordinary scheduling on CPU 4, and an interval of at
-least 250 ms. Its input is an owned copy of the latest road-camera NV12 frame,
+least 250 ms. It requests QCOM context priority 15 (lower priority than the
+default 8); driver scheduling still requires measurement. Its input is an
+owned copy of the latest road-camera NV12 frame,
 not the eGPU's driving input. GPU preprocessing letterboxes the full camera
 view into 512 x 256 RGB. For a 1344 x 760 camera the content is 453 x 256 with
 horizontal padding. The inverse letterbox transform maps boxes to the original
@@ -43,6 +45,11 @@ the worker. The NAS model and the eGPU driving artifacts are unchanged.
 QCOM needs branch-join materialization for YOLO: its compiler rejected a fused
 convolution/Concat kernel. This override is confined to the YOLO OnnxRunner;
 the global ONNX operator table and driving compiler are unchanged.
+Additional image-convolution kernels failed after splitting joins, so the
+current preparation uses `IMAGE=0`. The dedicated compiler also assigns legal
+workgroups of at most 64 threads to kernels without an explicit local size,
+instead of exhaustively benchmarking hundreds of local sizes per kernel.
+The compiler override is process-local and is not installed in modeld.
 
 ## Historical shared-eGPU execution and image coordinates
 

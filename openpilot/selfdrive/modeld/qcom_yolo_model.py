@@ -4,6 +4,35 @@ from __future__ import annotations
 import numpy as np
 
 
+def local_size_for(global_size):
+  """A legal, bounded workgroup for kernels without shared local memory."""
+  remaining = 64
+  result = []
+  for size in global_size:
+    local = next(value for value in (64, 32, 16, 8, 4, 2, 1) if value <= remaining and size % value == 0)
+    result.append(local)
+    remaining //= local
+  return tuple(result)
+
+
+def _bounded_local_size(call, prg):
+  from tinygrad.engine import realize
+  if (str(prg.src[1].arg).startswith('QCOM') and prg.arg.local_size is None and prg.arg.global_size is not None
+      and all(isinstance(x, int) for x in prg.arg.global_size)):
+    realize.local_size_cache.setdefault(prg.key, local_size_for(prg.arg.global_size))
+  return realize.optimize_local_size(call, prg)
+
+
+def configure_compiler():
+  """Only call in the dedicated compiler process, never in driving modeld."""
+  from tinygrad.engine import realize
+  from tinygrad.uop.ops import Ops, PatternMatcher, UPat
+
+  realize.pm_optimize_local_size = PatternMatcher([
+    (UPat(Ops.CALL, src=(UPat(Ops.PROGRAM, name='prg'),), name='call', allow_any_len=True), _bounded_local_size),
+  ])
+
+
 def letterbox_geometry(camera_size: tuple[int, int], model_size: tuple[int, int]):
   cw, ch = camera_size
   mw, mh = model_size
