@@ -157,6 +157,12 @@ worker startup verify SHA-256
 Missing or mismatched libraries disable the optional worker. Offroad compilation
 preserves the available CPU affinity when power management has CPUs 4-7 offline.
 
+A final Qualcomm-compiler FP16 Winograd trial was terminated by the supervisor
+when the vehicle returned onroad. It produced no completed latency or numerical
+result. The selected 66.64 ms IR3 candidate had already completed and remains
+available; final compilation with the production adapter must wait for cameras
+to stop. No commissioning marker was created by any saved-frame trial.
+
 ## Historical shared-eGPU execution and image coordinates
 
 After all three driving publications, modeld may run YOLOv8n on the newest
