@@ -143,16 +143,17 @@ def test_nms_empty_dense_and_nonfinite_outputs():
     decode_detections(raw, 320, 160)
 
 
-def test_source_fingerprint_and_driving_loop_has_no_optional_gpu_execution():
+def test_resident_yolo_uses_primary_queue_only_after_all_driving_publications():
   assert len(source_fingerprint()) == 64
   source = (Path(__file__).parents[1] / "modeld.py").read_text()
   tree = ast.parse(source)
   calls = [node for node in ast.walk(tree) if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)]
-  assert not any(node.func.attr == "after_publish" for node in calls)
-  assert 'carrotYolo' not in source and 'YoloRuntime' not in source
+  optional = [node.lineno for node in calls if node.func.attr == "after_publish"]
   driving = [node.lineno for node in calls if node.func.attr == "send" and node.args
              and isinstance(node.args[0], ast.Constant) and node.args[0].value in ("modelV2", "drivingModelData", "cameraOdometry")]
   assert len(driving) == 3
+  assert len(optional) == 1 and optional[0] > max(driving)
+  assert "ReuseRuntime.load(self.input_queues['img_q'])" in source
 
 
 def test_yuv_adapter_preserves_luma_parity_and_chroma():
@@ -175,12 +176,14 @@ def test_cereal_yolo_roundtrip_preserves_frame_and_detections():
   payload = msg.init("carrotYolo")
   payload.frameId = 123
   payload.cameraWidth, payload.cameraHeight = 1928, 1208
+  payload.submitTime, payload.readbackTime, payload.postprocessTime = .0003, .0017, .0004
   payload.detections = [{"classId": 0, "label": "person", "confidence": .9, "x1": .1, "y1": .2, "x2": .3, "y2": .4}]
   with log.Event.from_bytes(msg.to_bytes()) as result:
     assert result.which() == "carrotYolo"
     assert result.carrotYolo.frameId == 123
     assert result.carrotYolo.detections[0].label == "person"
     assert result.carrotYolo.cameraWidth == 1928
+    assert result.carrotYolo.readbackTime == pytest.approx(.0017)
 
 
 def test_camera_coordinates_use_warp_and_original_size():

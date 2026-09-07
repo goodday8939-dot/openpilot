@@ -16,8 +16,13 @@ def main():
   parser = argparse.ArgumentParser(description=__doc__)
   parser.add_argument('--directory', type=Path, required=True)
   parser.add_argument('--input-packed', type=Path, required=True)
+  parser.add_argument('--samples', type=int, default=3000)
+  parser.add_argument('--variants', nargs='+', choices=('original_fp32', 'native_fp32', 'native_fp16'),
+                      default=['original_fp32', 'native_fp32', 'native_fp16'])
   parser.add_argument('--stationary-maintenance', action='store_true')
   args = parser.parse_args()
+  if args.samples < 1000:
+    parser.error('at least 1000 samples are required')
   check_state(args.stationary_maintenance)
   out = args.directory
   manifest = json.loads((out/'manifest.json').read_text())
@@ -51,6 +56,8 @@ def main():
   queue = Tensor(host_queue, device=Device.DEFAULT).realize()
   variants = {}
   for name, native, dtype in [('original_fp32', False, 'float32'), ('native_fp32', True, 'float32'), ('native_fp16', True, 'float16')]:
+    if name not in args.variants:
+      continue
     print('compiling', name, flush=True)
     run = TinyJit(make_yolo_runner(OnnxRunner(source), 512, 256, native=native, output_dtype=dtype), prune=True)
     cold = []
@@ -61,14 +68,14 @@ def main():
     variants[name] = {'run': run, 'native': native, 'output_dtype': dtype, 'cold_ms': cold,
                       'samples': [], 'raw': raw.copy(), 'output_bytes': raw.nbytes}
     print('prepared', name, cold, flush=True)
-  reference = variants['original_fp32']['raw']
+  reference = next(iter(variants.values()))['raw']
   for value in variants.values():
     relevant = np.maximum(reference[:, 4], value['raw'][:, 4]) >= .35
     np.testing.assert_allclose(value['raw'][:, :4], reference[:, :4], atol=.5, rtol=.001)
     np.testing.assert_allclose(value['raw'][:, 4], reference[:, 4], atol=.001, rtol=0)
     np.testing.assert_array_equal(value['raw'][:, 5][relevant], reference[:, 5][relevant])
   config_realtime_process(7, 54)
-  for index in range(3000):
+  for index in range(args.samples):
     for value in variants.values():
       start = time.perf_counter()
       raw_tensor = run_yolo(value['run'], queue)
@@ -89,8 +96,11 @@ def main():
     report['variants'][name]['phases_ms'] = {phase: stats([r[i] for r in value['samples']]) for i, phase in
                                             enumerate(('submit', 'readback_wait', 'nms', 'total'))}
     np.savez_compressed(out/f'{name}_validation.npz', raw=value['raw'])
-  # Tail cost decides between implementations measured in interleaved order.
-  selected = min(variants, key=lambda name: report['variants'][name]['phases_ms']['total']['p99'])
+  # Admission reserves the measured worst cost; p99 alone can choose a variant
+  # whose isolated stall makes it ineligible for the driving frame's idle slot.
+  selected = min(variants, key=lambda name: (report['variants'][name]['phases_ms']['total']['max'],
+                                           report['variants'][name]['phases_ms']['total']['p99']))
+  report['selection_metric'] = 'maximum total, then p99 total'
   value = variants[selected]
   report['selected'] = selected
   bundle = {'version': ARTIFACT_VERSION, 'run': value['run'], 'queue_shape': shape, 'width': 512, 'height': 256,
