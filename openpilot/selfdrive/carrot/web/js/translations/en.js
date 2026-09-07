@@ -5,6 +5,10 @@ window.CarrotTranslations.register("en", {
   nativeName: "English",
   shortName: "EN",
   strings: {
+    egpu_yolo_radar_corner_only: "Radar: corner only",
+    egpu_yolo_radar_no_front: "Radar: no front objects",
+    egpu_yolo_radar_candidate: "Radar: candidates only · unvalidated",
+    egpu_yolo_radar_unavailable: "Radar: unavailable",
     egpu_yolo_prepared: "Internal GPU ready · awaiting trial",
     egpu_yolo_egpu_wait: "Awaiting eGPU driving inference",
     egpu_yolo_dm_active: "Driver monitoring active · waiting",

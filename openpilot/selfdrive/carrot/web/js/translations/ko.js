@@ -5,6 +5,10 @@ window.CarrotTranslations.register("ko", {
   nativeName: "한국어",
   shortName: "KO",
   strings: {
+    egpu_yolo_radar_corner_only: "레이더: 코너 신호만 수신",
+    egpu_yolo_radar_no_front: "레이더: 전방 물체 없음",
+    egpu_yolo_radar_candidate: "레이더: 연결 후보 · 미검증",
+    egpu_yolo_radar_unavailable: "레이더: 연결 불가",
     egpu_yolo_prepared: "내부 GPU 준비 완료 · 시험 대기",
     egpu_yolo_egpu_wait: "eGPU 주행 추론 대기",
     egpu_yolo_dm_active: "운전자 감시 실행 중 · 대기",

@@ -3,6 +3,25 @@
 const MAX_AGE_SECONDS = 0.35;
 const SVG_NS = "http://www.w3.org/2000/svg";
 
+export function detectionLabel(detection) {
+  const identity = Number.isSafeInteger(detection.trackId) ? `#${detection.trackId} ` : "";
+  const base = `${identity}${detection.label} ${(detection.confidence * 100).toFixed(0)}%`;
+  const radar = detection.radar;
+  if (radar?.state !== "candidate" || radar.source !== "frontRadar"
+    || ![radar.dRel, radar.vRel, radar.ageSeconds].every(Number.isFinite) || Math.abs(radar.ageSeconds) > .12) return base;
+  return `${base} · R?${radar.trackId} ${radar.dRel.toFixed(1)}m ${radar.vRel >= 0 ? "+" : ""}${radar.vRel.toFixed(1)}m/s`;
+}
+
+export function radarStatusLabel(status, tr) {
+  if (!status) return "";
+  if (status.state === "no_front_points") {
+    return Object.keys(status.sources || {}).some(source => source.startsWith("corner"))
+      ? tr("radar_corner_only", "Radar: corner only") : tr("radar_no_front", "Radar: no front objects");
+  }
+  return status.state === "candidate_only" ? tr("radar_candidate", "Radar: candidates only")
+    : tr("radar_unavailable", "Radar: unavailable");
+}
+
 export function selectDetectionFrame(history, presented, now) {
   if (presented?.source !== "live") return null;
   const timestamp = presented.cameraTimestampEof;
@@ -69,6 +88,7 @@ export function installEgpuYoloOverlay(target = globalThis) {
       : `YOLO · ${tr(state.state || "waiting", "Waiting")}`;
     badge.style.display = lastPayload ? "block" : "none";
     const frame = stopped ? null : selectDetectionFrame(history, presented, target.performance.now());
+    if (frame?.radarStatus) badge.textContent += ` · ${radarStatusLabel(frame.radarStatus, tr)}`;
     const stage = target.CarrotVisionStageTransform;
     if (!frame || !stage || !(stage.stageWidth > 0 && stage.stageHeight > 0)) { clear(); return; }
     const nextSignature = [frame.timestampEof, stage.scale, stage.tx, stage.ty, stage.stageWidth, stage.stageHeight,
@@ -97,7 +117,7 @@ export function installEgpuYoloOverlay(target = globalThis) {
       label.setAttribute("paint-order", "stroke");
       label.setAttribute("font-size", "13");
       label.setAttribute("font-family", "system-ui");
-      label.textContent = `${detection.label} ${(detection.confidence * 100).toFixed(0)}%`;
+      label.textContent = detectionLabel(detection);
       nodes.push(polygon, label);
     }
     svg.replaceChildren(...nodes);

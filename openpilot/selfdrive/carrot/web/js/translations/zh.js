@@ -5,6 +5,10 @@ window.CarrotTranslations.register("zh", {
   nativeName: "中文",
   shortName: "ZH",
   strings: {
+    egpu_yolo_radar_corner_only: "雷达：仅角雷达信号",
+    egpu_yolo_radar_no_front: "雷达：无前方目标",
+    egpu_yolo_radar_candidate: "雷达：候选关联 · 未验证",
+    egpu_yolo_radar_unavailable: "雷达：无法关联",
     egpu_yolo_prepared: "内部 GPU 已就绪 · 等待测试",
     egpu_yolo_egpu_wait: "等待 eGPU 驾驶推理",
     egpu_yolo_dm_active: "驾驶员监控运行中 · 等待",

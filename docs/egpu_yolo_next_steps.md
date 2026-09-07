@@ -9,6 +9,44 @@ validated or enabled by this plan.
 
 ## Current baseline
 
+### Stage 2 display prototype (2026-09-07)
+
+The Web backend now assigns session-scoped visual IDs using class-compatible,
+mutually unambiguous box overlap. It remembers a missed observation for at most
+400 ms, keeps at most 40 tracks, and never draws a remembered box as a new
+detection. Geometry/model changes and backwards timestamps reset track state;
+IDs are not reused within a backend session. Crossing/occluded-object identity
+is not validated; disputed pairs receive new IDs.
+
+The read-only backend also buffers raw `liveTracks`, calibration and camera
+metadata. Only explicitly sourced, measured `frontRadar` points can become
+association candidates. Unknown sources, SCC and corner radar are excluded.
+It aligns message time minus `CarParams.radarDelay` with camera EOF (120 ms
+maximum difference), projects a ground footpoint with calibrated camera
+intrinsics/extrinsics and the existing provisional 1.52 m longitudinal offset,
+and requires mutually unambiguous overlap with the visual box's lower region.
+The API carries radar source/ID, raw range, relative speed, alignment age and a
+heuristic geometry score. This score is not a probability. Web labels use `R?`
+and an explicitly unvalidated-candidate status. Missing/invalid/stale data or
+missing calibration never supplies a distance. No control service consumes
+these Web-only associations, and no GPU input/output schema changed.
+
+In a 30.06-second stationary capture from IONIQ 5 PE / dongle
+`07b62e389ed26c81`, the available raw radar records were exclusively `corner235`
+(595 point observations, seven IDs); there were no front-radar points. Replay
+produced one bicycle ID across all 451 bicycle observations in 458 valid YOLO
+frames, including seven empty frames, and zero radar association candidates.
+This establishes the observed stationary identity continuity and source
+exclusion, not moving-object matching accuracy. Reproduce with
+`python -m openpilot.tools.egpu_yolo.replay_tracking capture.json`; capture
+format and output limitations are documented in that tool. Unit cases cover
+projection sign, time delay, ambiguity, calibration failure and stale data.
+
+Moving/front-radar validation remains pending; Park testing does not require
+changing gear. Before treating candidates as matched identities, validate
+per-vehicle radar/camera alignment, object motion, false matches and ID switches
+against synchronized video and raw radar. Camera-only depth is not inferred.
+
 The follow-up has completed the initial 640 x 384 saved-input eGPU measurement
 and independent numerical check. See [eGPU timing](egpu_yolo2_timing.md).
 Its 5,000 resident-input runs took 5.45 ms p50 / 6.24 ms p99 / 7.39 ms maximum,

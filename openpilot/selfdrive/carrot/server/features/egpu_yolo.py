@@ -8,23 +8,40 @@ from pathlib import Path
 from aiohttp import web
 
 from openpilot.selfdrive.modeld.egpu_yolo import artifact_path, camera_time
+from openpilot.selfdrive.carrot.server.services.egpu_yolo_tracking import RadarAssociator, VisualTracker
 
 STATE = web.AppKey("egpu_yolo_state", dict)
 
 
 async def collector(app: web.Application):
-  from openpilot.cereal import messaging
+  from openpilot.cereal import car, messaging
+  from openpilot.common.params import Params
   sock = messaging.sub_sock("carrotYolo", conflate=True)
+  services = ('liveTracks', 'liveCalibration', 'roadCameraState', 'deviceState')
+  context = messaging.SubMaster(list(services))
+  tracker, radar = VisualTracker(), RadarAssociator()
+  next_params_read = 0.
   state = app[STATE]
   try:
     while True:
+      now = camera_time()
+      if now >= next_params_read:
+        next_params_read = now+5.
+        raw = Params().get('CarParams')
+        if raw:
+          with car.CarParams.from_bytes(raw) as cp:
+            radar.radar_delay = cp.radarDelay
+      context.update(0)
+      for service in services:
+        if context.updated[service]:
+          radar.ingest(service, context.logMonoTime[service]/1e9, context.valid[service], context[service].to_dict())
       event = messaging.recv_one_or_none(sock)
       if event is not None:
         data = event.carrotYolo.to_dict()
         state["status"] = {k: v for k, v in data.items() if k != "detections"}
         state["received"] = camera_time()
         if event.valid:
-          state["frame"] = data
+          state["frame"] = radar.associate(tracker.update(data))
       await asyncio.sleep(0.05)
   finally:
     del sock

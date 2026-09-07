@@ -1,6 +1,16 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { projectCameraBox, selectDetectionFrame } from "../src/features/drive/contents/vision/egpu_yolo.js";
+import { detectionLabel, radarStatusLabel, projectCameraBox, selectDetectionFrame } from "../src/features/drive/contents/vision/egpu_yolo.js";
+
+test("visual IDs and provisional radar labels never invent unmatched distance", () => {
+  const detection = { trackId: 7, label: "bicycle", confidence: .8 };
+  assert.equal(detectionLabel(detection), "#7 bicycle 80%");
+  const radar = { state: "candidate", source: "frontRadar", trackId: 12, dRel: 20, vRel: -2, ageSeconds: .05 };
+  assert.equal(detectionLabel({ ...detection, radar }), "#7 bicycle 80% · R?12 20.0m -2.0m/s");
+  assert.equal(detectionLabel({ ...detection, radar: { ...radar, source: "corner235" } }), "#7 bicycle 80%");
+  assert.equal(detectionLabel({ ...detection, radar: { ...radar, ageSeconds: .2 } }), "#7 bicycle 80%");
+  assert.equal(radarStatusLabel({ state: "no_front_points", sources: { corner235: 1 } }, (_, fallback) => fallback), "Radar: corner only");
+});
 
 test("camera projection follows the same viewport crop and scale as live video", () => {
   const stage = { videoWidth: 1000, videoHeight: 500, scale: .5, tx: -100, ty: 20 };
