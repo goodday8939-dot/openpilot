@@ -435,6 +435,30 @@ CPU 4 with ordinary scheduling and no GPU device descriptors. The supervisor
 resumed continuous stationary display. Complete samples and analysis remain in
 `live-reuse-optimized`; previous reports are retained separately.
 
+### Owner-disabled ONNX lane/BSD service
+
+After this trial, the owner reported disabling ONNX lane/BSD recognition and
+observing smoother YOLO results. The setting is `ShareData`; its observed raw
+value was `0`, modification time 1788782491.012, and managerState confirmed
+`xiaoge_data` stopped. The completed 60-second display window after that change
+contained 839 YOLO results and 1,200 primary frames (approximately 14.0 Hz over
+the 59.951-second first-to-last primary span), with zero drops or overruns.
+
+YOLO retained GPU cost measured 4.254/4.573/4.671 ms p50/p99/max, full result
+latency 6.469/13.176/15.519 ms, and CPU postprocessing 0.715/4.992/8.503 ms.
+Driving inference measured 35.977/37.514/41.085 ms. Median remaining budget after
+YOLO GPU work was 5.669 ms. Evidence is retained as
+`live_reuse_sharedata_off_samples.json` and `live_reuse_sharedata_off_summary.json`
+inside `live-reuse-optimized`.
+
+The separate lane/BSD service runs OpenCV DNN on CPU, with vision threads pinned
+to cores 0-3 and two OpenCV threads; the YOLO output worker is on CPU 4. Reduced
+background CPU/memory activity is a plausible explanation for the improvement,
+not proof of direct contention on CPU 4 or the eGPU. The earlier phase did not
+record this setting continuously, and these are unequal sequential windows,
+not repeated controlled ON/OFF trials. Do not attribute the earlier CPU outlier
+to this service as an established cause. No setting was changed by the agent.
+
 ## Recovery and validation limits
 
 The first recovery hit an operational issue: `restart.sh` begins with `git pull`,
