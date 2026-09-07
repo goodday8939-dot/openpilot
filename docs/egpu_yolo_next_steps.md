@@ -72,10 +72,16 @@ server to ordinary scheduling on CPUs0-3 before stopping a manager. This covers
 both existing-server pane creation and new-server startup. Unexpected server
 identity, scheduling policy or CPU availability fails before mutation. It does
 not alter primary process affinity or loosen runtime timing/admission guards.
-Four focused launcher tests pass. Live supervised restart with this correction
-and moving road observation remain pending. The absent UsbGpuActive flag is
-still unresolved; an open USB descriptor alone does not prove active inference
-backend, and the supervisor must not force that flag to bypass its checks.
+Four focused launcher tests pass. After the owner's manual reboot, the corrected
+supervised restart succeeded: manager and hardwared inherited CPUs0-3, while
+modeld retained CPU7. Road mode reached actual inference (1,106 runs, zero YOLO
+overruns, latest pipeline 6.11 ms and primary 35.26 ms / zero reported drops),
+with every sampled service passing frequency checks. The Web API was fresh and
+the rendered badge subsequently showed 1,414 runs and the road-observation label.
+The owner then departed; the vehicle-local supervisor continues without SSH.
+The full 30/180/30 trial and subsequent moving results require later log review.
+The earlier absent UsbGpuActive flag remains unexplained; it was active after
+reboot and was never forced to bypass the supervisor's checks.
 
 Detailed incident evidence and affinity backups remain device-local under
 `/data/egpu_yolo/lag-road-preparation`. Only this aggregate summary is committed.
