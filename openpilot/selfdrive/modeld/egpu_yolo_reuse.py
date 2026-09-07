@@ -2,7 +2,7 @@
 import json
 import math
 
-from openpilot.selfdrive.modeld.egpu_yolo import YoloRuntime, artifact_path, camera_detections, camera_time, decode_detections
+from openpilot.selfdrive.modeld.egpu_yolo import YoloRuntime, artifact_path, camera_time
 
 
 def session_path():
@@ -42,11 +42,15 @@ class ReuseRuntime(YoloRuntime):
       bundle = load_oob(stream)
     if bundle.get('input_rebinding_passed') is not True:
       raise ValueError('reuse artifact must prove changing input allocation and pixels')
+    if bundle.get('output_dtype') != 'float32':
+      raise ValueError('CPU delivery expects compact FP32 output')
     if not bundle.get('native') or (bundle['width'], bundle['height']) != (input_queue.shape[-1]*2, input_queue.shape[-2]*2):
       raise ValueError('reuse artifact must retain native driving input resolution')
     # This is a compiled artifact replay on the driving owner's startup thread.
     # No ONNX runner or compiler is invoked on live camera frames.
     runtime = cls(input_queue, bundle)
+    from openpilot.selfdrive.modeld.egpu_yolo_postprocess import OutputWorker
+    runtime.output = OutputWorker()
     from openpilot.common.swaglog import cloudlog
     cloudlog.info('resident YOLO prepared: %s, required %.3f ms', bundle['variant'], runtime.budget.estimate*1000+.001*1000)
     return runtime
@@ -58,15 +62,11 @@ class ReuseRuntime(YoloRuntime):
     submitted = camera_time()
     values = read_yolo(raw)
     copied = camera_time()
-    detections = decode_detections(values, self.width, self.height, compact=True)
-    for detection in detections:
-      detection['label'] = self.names[detection['classId']]
-    self.phases = (submitted-start, copied-submitted, camera_time()-copied)
-    return detections
+    self.phases = (submitted-start, copied-submitted, 0.)
+    return values
 
   def after_publish(self, pm, frame_id, sof_ns, eof_ns, received, driving_published, dropped, camera,
                     transform, camera_size, next_frame_ready, inference_started, inference_ended, *, permitted):
-    from openpilot.cereal import messaging
     self.budget.observe(frame_id, sof_ns/1e9, received, dropped)
     if not permitted or not read_session(enabled=False):
       return
@@ -74,10 +74,10 @@ class ReuseRuntime(YoloRuntime):
     pending = next_frame_ready() if enabled else False
     start = camera_time()
     reason = self.budget.admit(start, pending) if enabled else 'paused'
-    detections = []
+    values = None
     if reason == 'run':
       try:
-        detections = camera_detections(self.infer(), transform, (self.width, self.height), camera_size)
+        values = self.infer()
       except Exception:
         from openpilot.common.swaglog import cloudlog
         cloudlog.exception('optional resident YOLO failed; disabling this session')
@@ -85,9 +85,7 @@ class ReuseRuntime(YoloRuntime):
       self.last_execution = camera_time()-start
     elif start-self.last_publish < 1:
       return
-    msg = messaging.new_message('carrotYolo')
-    msg.valid = reason == 'run'
-    msg.carrotYolo = {
+    metadata = {
       'frameId': frame_id, 'timestampSof': sof_ns, 'timestampEof': eof_ns,
       'modelId': self.model_id, 'camera': camera, 'state': reason,
       'executionTime': self.last_execution, 'budgetTime': max(0, self.budget.deadline-start),
@@ -96,10 +94,12 @@ class ReuseRuntime(YoloRuntime):
       'inferenceEndTime': int(inference_ended*1e9), 'deadlineTime': int(max(0, self.budget.deadline)*1e9),
       'requiredTime': self.budget.estimate+.001, 'runs': self.budget.runs+int(reason == 'run'),
       'skipped': self.budget.skipped, 'overruns': self.budget.overruns,
-      'cameraWidth': camera_size[0], 'cameraHeight': camera_size[1], 'detections': detections,
+      'cameraWidth': camera_size[0], 'cameraHeight': camera_size[1], 'detections': [],
       'submitTime': self.phases[0], 'readbackTime': self.phases[1], 'postprocessTime': self.phases[2],
     }
-    pm.send('carrotYolo', msg)
+    # Only compact output crosses this bounded nonblocking CPU socket. The
+    # primary owner immediately returns to receiving the next driving frame.
+    self.output.send((metadata, values, transform, camera_size, self.names, start))
     self.last_publish = camera_time()
     if reason == 'run':
       self.budget.finish(start, self.last_publish)

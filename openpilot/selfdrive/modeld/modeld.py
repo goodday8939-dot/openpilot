@@ -338,7 +338,7 @@ def main(demo=False):
   cloudlog.warning(f"models loaded in {time.monotonic() - st:.1f}s, modeld starting")
 
   # messaging
-  pm = PubMaster(["modelV2", "drivingModelData", "cameraOdometry"] + (["carrotYolo"] if model.reuse_yolo is not None else []))
+  pm = PubMaster(["modelV2", "drivingModelData", "cameraOdometry"])
   sm = SubMaster(["deviceState", "carState", "roadCameraState", "liveCalibration", "driverMonitoringState", "carControl",
                   "liveDelay", "carrotMan", "radarState", "selfdriveState"], frequency=ModelConstants.MODEL_RUN_FREQ)
 

@@ -47,19 +47,18 @@ def test_only_fresh_disabled_parked_frame_with_timely_primary_can_run(override):
 def test_session_gates_actual_submission_and_publication_cost_latches_overrun(monkeypatch, permitted, prepared, enabled, expected):
   from types import SimpleNamespace
   import numpy as np
-  from openpilot import cereal
   from openpilot.selfdrive.modeld.egpu_yolo import IdleBudget
   from openpilot.selfdrive.modeld import egpu_yolo_reuse
   clock = [101.27]
   monkeypatch.setattr(egpu_yolo_reuse, 'camera_time', lambda: clock[0])
   monkeypatch.setattr(egpu_yolo_reuse, 'read_session', lambda **kwargs: prepared and (enabled or kwargs.get('enabled') is False))
-  monkeypatch.setattr(cereal, 'messaging', SimpleNamespace(new_message=lambda _: SimpleNamespace()), raising=False)
   runtime = egpu_yolo_reuse.ReuseRuntime.__new__(egpu_yolo_reuse.ReuseRuntime)
   runtime.budget = IdleBudget(.003)
   for frame in range(25):
     runtime.budget.observe(frame, 100+frame*.05, 100+frame*.05+.01)
   runtime.width, runtime.height = 512, 256
   runtime.model_id, runtime.phases = 'test', (.0003, .0017, .0004)
+  runtime.names = ['person', 'bicycle']
   runtime.last_publish = runtime.last_execution = 0.
   submissions, publications = [], []
 
@@ -68,13 +67,14 @@ def test_session_gates_actual_submission_and_publication_cost_latches_overrun(mo
     clock[0] += .003
     return []
 
-  def send(service, message):
-    publications.append(message.carrotYolo)
+  def send(packet):
+    publications.append(packet[0])
     # Account for publication time, including a stall after inference returned.
     clock[0] = 101.32
 
   runtime.infer = infer
-  runtime.after_publish(SimpleNamespace(send=send), 25, 101250000000, 101255000000, 101.26, 101.27, False,
+  runtime.output = SimpleNamespace(send=send)
+  runtime.after_publish(None, 25, 101250000000, 101255000000, 101.26, 101.27, False,
                         'road', np.eye(3), (1344, 760), lambda: False, 101.26, 101.27, permitted=permitted)
   assert bool(submissions) is (expected == 'run')
   assert [m['state'] for m in publications] == ([] if expected is None else [expected])
