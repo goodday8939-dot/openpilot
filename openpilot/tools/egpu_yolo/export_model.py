@@ -22,8 +22,12 @@ def main():
   parser = argparse.ArgumentParser(description=__doc__)
   parser.add_argument("--weights", type=Path, required=True, help="official yolov8n.pt")
   parser.add_argument("--output", type=Path, required=True)
+  parser.add_argument("--width", type=int, default=320)
+  parser.add_argument("--model-base-url", default="https://upload.shind0.synology.me/models/carrot-egpu-yolo/")
   args = parser.parse_args()
-  width, height = 320, 160
+  width, height = args.width, args.width // 2
+  if width % 64 or not 128 <= width <= 512:
+    parser.error("width must be a multiple of 64 from 128 to 512")
   model = YOLO(args.weights)
   exported = Path(model.export(format="onnx", imgsz=(height, width), batch=1, dynamic=False, simplify=False,
                               opset=13, half=False, nms=False, device="cpu"))
@@ -40,9 +44,9 @@ def main():
   args.output.mkdir(parents=True, exist_ok=True)
   destination = args.output / "big_driving_supercombo.onnx"
   shutil.copyfile(exported, destination)
-  manifest = {"model_id": "yolov8n-coco-320x160-v1", "filename": destination.name, "size": destination.stat().st_size,
+  manifest = {"model_id": f"yolov8n-coco-{width}x{height}-v1", "filename": destination.name, "size": destination.stat().st_size,
               "sha256": hashlib.sha256(destination.read_bytes()).hexdigest(), "width": width, "height": height,
-              "url": "https://upload.shind0.synology.me/models/carrot-egpu-yolo/" + destination.name,
+              "url": args.model_base_url.rstrip('/') + '/' + destination.name,
               "names": [model.names[i] for i in range(len(model.names))],
               "source_weights_sha256": hashlib.sha256(args.weights.read_bytes()).hexdigest(),
               "source_url": "https://github.com/ultralytics/assets/releases/download/v8.3.0/yolov8n.pt",
