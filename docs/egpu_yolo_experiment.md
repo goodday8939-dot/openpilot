@@ -87,6 +87,25 @@ typical remainder. The revised 20% plus 1 ms reservation retains measured worst
 execution, pending-camera priority and disable-on-overrun; it needs its own
 live latency comparison before claiming a higher sustained detection rate.
 
+With the revised reservation, a 60.06-second stationary sample recorded 223
+YOLO executions (about 3.8 Hz over the 58-second settled window), 5.27 ms p50 /
+5.62 ms p99 / 5.73 ms max, and zero frame drops or estimated-deadline overruns.
+Primary inference across 1,162 frames measured 36.15 ms p50 / 38.02 ms p99 /
+42.85 ms max. Matched YOLO frames measured 0.41 ms preparation, 2.65 ms
+postprocessing/publication and 39.48 ms total ready-to-publication medians,
+leaving about 10.52 ms nominal idle time; admission required 8.52 ms.
+The scene had changed and this sample contained no COCO detections; the earlier
+native-resolution sample produced 28 car detections, and the web SVG geometry
+and car label were inspected against the existing camera image.
+
+This is not a controlled same-scene driving A/B. Model-event timestamp latency
+from camera EOF measured 85.38 ms p50 / 100.44 ms p99 / 113.04 ms max, compared
+with an earlier baseline's 80.83 / 95.54 / 98.62 ms. Those event timestamps are
+set immediately after inference, before filling and sending the publications.
+Publication intervals measured 50.06 ms p50 / 66.57 ms p99 / 84.07 ms max.
+Zero dropped frames does not establish zero latency impact, and the predicted
+deadline cannot preempt a running GPU job when camera delivery arrives early.
+
 ## Preparation
 
 On a workstation, use `openpilot/tools/egpu_yolo/export_model.py` with the
