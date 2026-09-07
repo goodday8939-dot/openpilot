@@ -17,7 +17,7 @@ import numpy as np
 ARTIFACT_VERSION = 1
 FRAME_PERIOD = 0.05
 MIN_INTERVAL = 0.2
-GUARD = 0.005
+GUARD = 0.002  # in addition to the 40% margin on the measured worst execution
 MAX_DETECTIONS = 40
 MAX_CANDIDATES = 200
 
@@ -34,7 +34,7 @@ def artifact_path() -> Path:
 def source_fingerprint() -> str:
   directory = Path(__file__).parent
   digest = hashlib.sha256()
-  for name in ("egpu_yolo.py", "egpu_yolo_model.py", "egpu_yolo_prepare.py"):
+  for name in ("egpu_yolo.py", "egpu_yolo_model.py", "egpu_yolo_prepare.py", "egpu_yolo_usb.py"):
     digest.update((directory / name).read_bytes())
   root = directory.parents[2]
   for name in ("engine/jit.py", "runtime/ops_amd.py", "runtime/graph/hcq.py"):
@@ -189,8 +189,9 @@ class YoloRuntime:
     return cls(input_queue, bundle)
 
   def infer(self):
-    raw = self.run(queue=self.queue)
-    detections = decode_detections(raw.numpy(), self.width, self.height, compact=True)
+    from openpilot.selfdrive.modeld.egpu_yolo_usb import run_yolo, read_yolo
+    raw = run_yolo(self.run, self.queue)
+    detections = decode_detections(read_yolo(raw), self.width, self.height, compact=True)
     for detection in detections:
       detection["label"] = self.names[detection["classId"]]
     return detections

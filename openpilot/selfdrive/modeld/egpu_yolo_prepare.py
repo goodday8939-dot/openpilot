@@ -11,7 +11,7 @@ import tempfile
 import time
 from urllib.request import urlopen
 
-from openpilot.selfdrive.modeld.egpu_yolo import ARTIFACT_VERSION, artifact_path, decode_detections, source_fingerprint
+from openpilot.selfdrive.modeld.egpu_yolo import ARTIFACT_VERSION, GUARD, artifact_path, decode_detections, source_fingerprint
 
 MANIFEST_URL = "https://upload.shind0.synology.me/models/carrot-egpu-yolo/manifest.json"
 REMOTE_FILENAME = "big_driving_supercombo.onnx"  # NAS model endpoint's supported filename; this directory contains only YOLO.
@@ -59,6 +59,7 @@ def compile_model(directory: Path):
   import openpilot.selfdrive.modeld.compile_modeld  # noqa: F401 -- firmware and serialization patches
   from openpilot.selfdrive.modeld.helpers import dump_oob, load_oob, usbgpu_compiled_path
   from openpilot.selfdrive.modeld.egpu_yolo_model import make_yolo_runner
+  from openpilot.selfdrive.modeld.egpu_yolo_usb import run_yolo, read_yolo
   from tinygrad import Tensor, TinyJit
   from tinygrad.device import Device
   from tinygrad.nn.onnx import OnnxRunner
@@ -86,19 +87,19 @@ def compile_model(directory: Path):
   run = TinyJit(make_yolo_runner(runner, width, height), prune=True)
   queue = Tensor.full(queue_shape, 128, dtype="uint8").contiguous().realize()
   for _ in range(3):
-    raw = run(queue=queue)
-    raw.numpy()
+    raw = run_yolo(run, queue)
+    read_yolo(raw)
   # Match modeld's CPU affinity and scheduling for the synchronous GPU
   # submission/readback benchmark; compile itself can use ordinary scheduling.
   from openpilot.common.realtime import config_realtime_process
   config_realtime_process(7, 54)
   for _ in range(5):
-    decode_detections(run(queue=queue).numpy(), width, height, compact=True)
+    decode_detections(read_yolo(run_yolo(run, queue)), width, height, compact=True)
   elapsed = []
   for _ in range(30):
     start = time.monotonic()
-    raw = run(queue=queue)
-    decode_detections(raw.numpy(), width, height, compact=True)
+    raw = run_yolo(run, queue)
+    decode_detections(read_yolo(raw), width, height, compact=True)
     elapsed.append(time.monotonic() - start)
   bundle = {"version": ARTIFACT_VERSION, "run": run, "queue_shape": queue_shape,
             "width": width, "height": height, "names": manifest["names"], "model_id": manifest["model_id"],
@@ -110,12 +111,12 @@ def compile_model(directory: Path):
     dump_oob(bundle, f)
   with temporary.open("rb") as f:
     restored = load_oob(f)
-  raw2 = restored["run"](queue=queue)
+  raw2 = run_yolo(restored["run"], queue)
   import numpy as np
   np.testing.assert_allclose(raw2.numpy(), raw.numpy(), rtol=1e-3, atol=1e-3)
   temporary.replace(target)
   report = {"model_id": manifest["model_id"], "measured_seconds": elapsed, "queue_shape": queue_shape,
-            "admission_seconds": max(elapsed) * 1.4 + 0.005, "compiled_monotonic": time.monotonic()}
+            "admission_seconds": max(elapsed) * 1.4 + GUARD, "compiled_monotonic": time.monotonic()}
   (directory / "compile_report.json").write_text(json.dumps(report, indent=2) + "\n")
   print(json.dumps(report), flush=True)
 

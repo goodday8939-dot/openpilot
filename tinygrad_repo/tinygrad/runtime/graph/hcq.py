@@ -9,9 +9,16 @@ from tinygrad.engine.jit import GraphRunner, MultiGraphRunner
 from tinygrad.runtime.ops_rdma import RDMACopyQueue
 
 class HCQGraph(MultiGraphRunner):
+  # Opt-in for an independently submitted, compute-only USB AMD graph.
+  # The normal multi-queue path remains the default for driving inference.
+  single_queue = False
+
   def __init__(self, *args, **kwargs):
     super().__init__(*args, **kwargs)
     self.devices = list({cast(HCQCompiled, Device[b.device]) for (_,_,bufs,_) in self.calls for b in bufs})
+    if self.single_queue:
+      assert len(self.devices) == 1 and all(r is not None for r in self.runtimes), "single_queue requires one compute-only device"
+      assert self.devices[0].device.split(":")[0] == "AMD" and self.devices[0].is_usb(), "single_queue requires USB AMD"
 
     # CPU Device is always last
     self.devices = sorted(self.devices, key=lambda x: 1 if x._is_cpu() else 0)
@@ -156,8 +163,9 @@ class HCQGraph(MultiGraphRunner):
     self.virt_timeline_signals = {dev: unwrap(dev.signal_t)(HCQBuffer(timeline_sigaddrs[dev], 16),owner=dev,is_timeline=True) for dev in self.devices}
 
     for dev in self.devices:
-      self.comp_queues[dev].memory_barrier().wait(self.virt_timeline_signals[dev], self.virt_timeline_vals[dev]) \
-                           .wait(self.kick_signals[dev.peer_group], self.kickoff_var).signal(self.signals[dev], self.kickoff_var)
+      self.comp_queues[dev].memory_barrier().wait(self.virt_timeline_signals[dev], self.virt_timeline_vals[dev])
+      if not self.single_queue:
+        self.comp_queues[dev].wait(self.kick_signals[dev.peer_group], self.kickoff_var).signal(self.signals[dev], self.kickoff_var)
 
     for j, ((dev_idx, ast, bufs, _), runtime) in enumerate(zip(self.calls, self.runtimes)):
       enqueue_dev, enqueue_queue, sync_signals, deps, signal, signal_val = self.ji_schedule[j]
@@ -292,8 +300,9 @@ class HCQGraph(MultiGraphRunner):
       self.last_timeline[dev] = (dev.timeline_signal, dev.next_timeline())
 
     # Launch graph
-    for sig in self.queue_signals_to_reset: sig.value = 0
-    for sig in self.kick_signals.values(): sig.value = self.kickoff_value
+    if not self.single_queue:
+      for sig in self.queue_signals_to_reset: sig.value = 0
+      for sig in self.kick_signals.values(): sig.value = self.kickoff_value
 
     if wait:
       st = time.perf_counter()

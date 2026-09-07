@@ -38,10 +38,25 @@ receive time plus 50 ms. A late receive does not grant another free 50 ms.
 Frame gaps, timestamp jumps, and dropped frames restart settling.
 
 YOLO runs at most five times per second. Admission reserves 1.4 times the
-largest measured full execution time plus a 5 ms guard. A completion exceeding
+largest measured full execution time plus a 2 ms guard. A completion exceeding
 the deadline minus guard disables YOLO for that modeld session. This protects
 subsequent submissions; it does not preempt an already submitted GPU job.
 The actual eGPU must be measured before this is considered validated for use.
+
+YOLO alone opts into a compute-only USB AMD graph. It retains the device
+timeline dependency and completion signal, but needs no multi-queue host
+kickoff/reset. The normal graph factory is restored before driving inference.
+Its result copy is submitted with a GPU timeline wait while compute completes;
+the blocking USB read still finishes before decoding and publishing results.
+
+Stationary commissioning on 2026-09-07, using YOLOv8n COCO at 320x160, measured
+about 1.49 ms of GPU kernels. The original full path measured 7.74 ms p50 /
+8.95 ms max; the YOLO-only serial graph and overlapped copy submission measured
+4.64 ms p50 / 5.34 ms max (60 runs, driving weights resident). Three different
+random YUV inputs produced exactly equal outputs before and after optimization.
+These are isolated execution measurements, not a validated live detection rate.
+The original conservative live scheduler admitted zero runs in a 40-second
+sample. Live admission, primary latency and overlay checks remain necessary.
 
 ## Preparation
 
