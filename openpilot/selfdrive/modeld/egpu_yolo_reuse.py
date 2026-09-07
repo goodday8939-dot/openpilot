@@ -73,7 +73,9 @@ class ReuseRuntime(YoloRuntime):
     enabled = read_session()
     pending = next_frame_ready() if enabled else False
     start = camera_time()
-    reason = self.budget.admit(start, pending) if enabled else 'paused'
+    # Consider every completed primary frame. The camera/deadline/overrun
+    # checks still decide whether this frame has room for optional GPU work.
+    reason = self.budget.admit(start, pending, min_interval=0.) if enabled else 'paused'
     values = None
     if reason == 'run':
       try:

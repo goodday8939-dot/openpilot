@@ -77,14 +77,14 @@ class IdleBudget:
     # every later frame's idle slot for the whole six-second window.
     self.deadline = min(received + FRAME_PERIOD, sof + median(self.offsets) + FRAME_PERIOD)
 
-  def admit(self, now: float, camera_pending: bool = False) -> str:
+  def admit(self, now: float, camera_pending: bool = False, *, min_interval: float = MIN_INTERVAL) -> str:
     if self.disabled_reason:
       reason = self.disabled_reason
     elif self.settled < 20:
       reason = "warming"
     elif camera_pending:
       reason = "camera_pending"
-    elif now - self.last_run < MIN_INTERVAL:
+    elif now - self.last_run < min_interval:
       return "rate_limit"
     elif now + self.estimate + GUARD > self.deadline:
       reason = "no_budget"

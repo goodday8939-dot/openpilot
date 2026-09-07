@@ -32,6 +32,23 @@ def test_late_camera_receive_does_not_create_false_free_time():
   assert budget.admit(101.300) == "no_budget"
 
 
+def test_every_frame_admission_removes_only_the_rate_limit():
+  budget = settled_budget()
+  first = budget.deadline-.02
+  assert budget.admit(first, min_interval=0.) == 'run'
+  budget.finish(first, first+.006)
+  budget.observe(25, 101.25, 101.26)
+  assert budget.admit(101.29) == 'rate_limit'
+  assert budget.admit(101.29, min_interval=0.) == 'run'
+  budget.finish(101.29, 101.296)
+  budget.observe(26, 101.3, 101.31)
+  assert budget.admit(101.34, camera_pending=True, min_interval=0.) == 'camera_pending'
+  assert budget.admit(101.355, min_interval=0.) == 'no_budget'
+  assert budget.admit(101.34, min_interval=0.) == 'run'
+  budget.finish(101.34, budget.deadline+.002)
+  assert budget.admit(102., min_interval=0.) == 'overrun'
+
+
 def test_isolated_early_camera_does_not_remove_idle_slots_from_later_frames():
   budget = IdleBudget(.006)
   for frame in range(25):
