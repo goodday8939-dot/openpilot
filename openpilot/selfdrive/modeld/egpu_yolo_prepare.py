@@ -11,7 +11,7 @@ import tempfile
 import time
 from urllib.request import urlopen
 
-from openpilot.selfdrive.modeld.egpu_yolo import ARTIFACT_VERSION, GUARD, artifact_path, decode_detections, source_fingerprint
+from openpilot.selfdrive.modeld.egpu_yolo import ARTIFACT_VERSION, GUARD, RUNTIME_MARGIN, artifact_path, decode_detections, source_fingerprint
 
 MANIFEST_URL = "https://upload.shind0.synology.me/models/carrot-egpu-yolo-512x256/manifest.json"
 REMOTE_FILENAME = "big_driving_supercombo.onnx"  # NAS model endpoint's supported filename; this directory contains only YOLO.
@@ -116,7 +116,7 @@ def compile_model(directory: Path):
   np.testing.assert_allclose(raw2.numpy(), raw.numpy(), rtol=1e-3, atol=1e-3)
   temporary.replace(target)
   report = {"model_id": manifest["model_id"], "measured_seconds": elapsed, "queue_shape": queue_shape,
-            "admission_seconds": max(elapsed) * 1.4 + GUARD, "compiled_monotonic": time.monotonic()}
+            "admission_seconds": max(elapsed) * RUNTIME_MARGIN + GUARD, "compiled_monotonic": time.monotonic()}
   (directory / "compile_report.json").write_text(json.dumps(report, indent=2) + "\n")
   print(json.dumps(report), flush=True)
 

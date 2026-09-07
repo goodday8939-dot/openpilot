@@ -18,7 +18,8 @@ import numpy as np
 ARTIFACT_VERSION = 1
 FRAME_PERIOD = 0.05
 MIN_INTERVAL = 0.2
-GUARD = 0.002  # in addition to the 40% margin on the measured worst execution
+RUNTIME_MARGIN = 1.2
+GUARD = 0.001  # in addition to the margin on the measured worst execution
 MAX_DETECTIONS = 40
 MAX_CANDIDATES = 200
 
@@ -48,7 +49,7 @@ class IdleBudget:
   def __init__(self, measured_seconds: float):
     if not math.isfinite(measured_seconds) or measured_seconds <= 0:
       raise ValueError("YOLO needs a measured positive runtime")
-    self.estimate = measured_seconds * 1.4
+    self.estimate = measured_seconds * RUNTIME_MARGIN
     self.offsets: deque[float] = deque(maxlen=120)
     self.last_frame = -1
     self.last_sof = 0.0
@@ -95,7 +96,7 @@ class IdleBudget:
 
   def finish(self, start: float, end: float):
     self.runs += 1
-    self.estimate = max(self.estimate, (end - start) * 1.4)
+    self.estimate = max(self.estimate, (end - start) * RUNTIME_MARGIN)
     if end + GUARD > self.deadline:
       self.overruns += 1
       self.disabled_reason = "overrun"
@@ -203,7 +204,7 @@ class YoloRuntime:
       start = time.monotonic()
       self.infer()
       if i > 0:
-        self.budget.estimate = max(self.budget.estimate, (time.monotonic() - start) * 1.4)
+        self.budget.estimate = max(self.budget.estimate, (time.monotonic() - start) * RUNTIME_MARGIN)
 
   @classmethod
   def load(cls, input_queue):

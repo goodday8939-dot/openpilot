@@ -26,7 +26,7 @@ def test_admit_only_when_whole_job_fits_and_rate_limit_does_not_override_deadlin
 
 
 def test_late_camera_receive_does_not_create_false_free_time():
-  budget = settled_budget()
+  budget = settled_budget(.010)
   budget.observe(25, 101.25, 101.297)
   assert budget.deadline == pytest.approx(101.31)
   assert budget.admit(101.300) == "no_budget"

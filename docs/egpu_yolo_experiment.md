@@ -45,8 +45,8 @@ preserved for the next driving iteration. The prediction remains best effort:
 camera delivery jitter can still make a future frame arrive earlier than the
 predicted deadline, so primary latency must be measured alongside YOLO timing.
 
-YOLO runs at most five times per second. Admission reserves 1.4 times the
-largest measured full execution time plus a 2 ms guard. A completion exceeding
+YOLO runs at most five times per second. Admission reserves 1.2 times the
+largest measured full execution time plus a 1 ms guard. A completion exceeding
 the deadline minus guard disables YOLO for that modeld session. This protects
 subsequent submissions; it does not preempt an already submitted GPU job.
 The actual eGPU must be measured before this is considered validated for use.
@@ -77,6 +77,15 @@ camera subscriber measured a 56.43 ms median SOF-to-pair-ready offset, with a
 These 320x160 measurements do not validate the enlarged detector or new admission
 policy. The result service now includes input-ready, inference-start/end,
 publication/deadline timestamps and required time to distinguish each phase.
+
+A first native-512x256 live sample measured 0.44 ms input preparation, 35.80 ms
+inference and 2.64 ms postprocessing/publication (matched-frame medians), leaving
+about 11.13 ms of a nominal 50 ms period. YOLO measured 5.66 ms p50 / 6.40 ms max
+and admitted 28 runs in 60 seconds, with no drops or estimated-deadline overruns.
+The initial 40% plus 2 ms reservation grew to 11.28 ms, slightly exceeding that
+typical remainder. The revised 20% plus 1 ms reservation retains measured worst
+execution, pending-camera priority and disable-on-overrun; it needs its own
+live latency comparison before claiming a higher sustained detection rate.
 
 ## Preparation
 
