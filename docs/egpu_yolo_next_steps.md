@@ -33,6 +33,15 @@ second camera upload. Changed-input/allocation/serialized-replay checks prevent
 reuse of the prototype's stale capture-time buffer. See the timing report for
 excluded attempts, primary comparisons, retained samples and validation limits.
 
+The owner then requested considering every primary frame. Removing only the
+native runtime's 200 ms interval produced 2,091 results in 180 seconds (11.62 Hz)
+with zero YOLO overruns or reported driving drops in another 30/180/30-second
+stationary comparison. Retained GPU work measured 4.80 ms p50 / 5.17 ms p99 /
+5.69 ms maximum; full result latency was 8.73 / 21.18 / 28.70 ms. Pending-camera,
+deadline, Park and overrun guards remain active, so this is per-frame admission
+with conditional execution, not a guaranteed 20 Hz output. Continuous supervised
+stationary display now uses this mode. The focused suite passes 114 tests.
+
 The last internal-GPU continuous-display attempt had already stopped before
 the follow-up: 421 results, then a 150.47 ms model-publication gap with frame-ID
 delta 3 on the non-conflating observer. Its root cause remains unisolated.

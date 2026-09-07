@@ -179,7 +179,9 @@ process is launched. It executes only after `modelV2`, `drivingModelData` and
 `cameraOdometry` are published. Fresh Park/standstill, disabled controls, inactive
 actuation flags, a primary run below 60 ms, a stable camera cadence and no pending
 next frame are required. Admission reserves the measured maximum multiplied by
-1.2 plus 1 ms, and caps attempts at 5 Hz. GPU submission, readback and nonblocking
+1.2 plus 1 ms. The initial comparison capped attempts at 5 Hz; the later
+per-frame experiment removes that interval for this native-buffer runtime only.
+GPU submission, readback and nonblocking
 CPU delivery are included in the overrun latch. An overrun or exception prevents
 further optional submissions.
 
@@ -209,7 +211,7 @@ It neither imports tinygrad nor opens a GPU device. Parent socket closure ends
 the worker. `executionTime` measures the result pipeline through CPU completion;
 `submitTime` and `readbackTime` isolate the work retained on the primary owner.
 
-## Completed stationary comparison
+## Completed stationary comparison with the initial 5 Hz cap
 
 The CPU-separated implementation at `169aca698a` completed a 30-second disabled
 baseline, 180 seconds enabled, and a 30-second disabled recovery in the same
@@ -265,6 +267,75 @@ attempts remain in `live-reuse-stale` and `live-reuse-bound`. The native adapter
 lease/admission, nonblocking delivery, CPU decoder, USB helpers and existing QCOM
 checks pass 113 focused tests. Ruff passes for the changed code; two pre-existing
 modeld findings (`ISC002`, `F841`) are excluded without modifying unrelated code.
+
+## Per-frame admission follow-up
+
+At the owner's request, `df63d1669b` removes the 200 ms interval from the
+native-buffer runtime. It considers YOLO after every completed primary frame.
+The older optional runtime retains its default interval. Camera prefetch,
+deadline prediction, worst-observed cost multiplied by 1.2 plus 1 ms, fresh
+Park/disabled state and the latched overrun stop remain unchanged. A regression
+test covers consecutive-frame admission and rejection for pending cameras,
+insufficient budget and overruns; the focused suite passes 114 tests.
+
+The source-fingerprint change required rebuilding the artifact under exclusive
+stationary maintenance. The new 5,000-run saved-input total measured 3.966 ms
+p50 / 4.777 ms p99 / 5.431 ms maximum. Changed allocations, in-place pixels and
+serialized rebinding passed again. Independent ONNX validation retained maximum
+box error 0.000763 pixels and score error 0.000000715. Evidence is in
+`results-reuse-every-frame`; the earlier 5 Hz measurements remain separate.
+
+A 35 ms driving inference plus about 5 ms retained YOLO GPU work can fit inside
+a 50 ms camera period. That arithmetic omits work outside driving inference and
+camera-delivery jitter. Admission therefore considers the remaining deadline
+budget, not just the displayed inference time. Removing the interval permits
+consecutive frames but does not promise a YOLO result on all 20 frames/second.
+
+The repeated stationary 30/180/30-second comparison passed with 2,091 results
+in 180.012 seconds, **11.62 Hz**, versus the earlier 3.91 Hz. All 3,600 enabled
+primary frames were observed, with zero reported drops and zero YOLO overruns.
+Of the results, 2,060 contained 2,061 distinct detections and 31 were empty.
+The reserved time grew from 7.517 to 8.223 ms with live observations; frames
+without enough remaining time or with the next camera already pending still
+skip optional work. Skipped reasons are not recorded for every frame, so this
+trial does not quantify each rejection reason separately.
+
+| Per-frame trial measurement | p50 ms | p95 ms | p99 ms | Maximum ms |
+| --- | ---: | ---: | ---: | ---: |
+| YOLO submission + GPU completion/readback | 4.802 | 5.037 | 5.172 | 5.687 |
+| Full YOLO result pipeline, including CPU worker | 8.730 | 16.064 | 21.180 | 28.697 |
+| CPU postprocessing, outside primary owner | 0.787 | 5.230 | 9.957 | 17.375 |
+| Driving inference, baseline | 36.685 | 37.796 | 38.446 | 38.816 |
+| Driving inference, enabled | 36.279 | 37.489 | 38.228 | 43.382 |
+| Driving inference, recovery | 36.240 | 37.527 | 38.210 | 41.709 |
+
+Baseline and recovery each received 600 primary and 600 messages per camera.
+The enabled camera counts were 3,600 or 3,601 at the window boundaries. Maximum
+primary publication gaps were 75.453 / 81.340 / 67.571 ms for baseline / enabled
+/ recovery; all maximum primary frame-ID deltas were one. Enabled camera gaps
+were below 67.736 ms. Camera EOF to YOLO publication measured 94.206 ms p50 /
+108.195 ms p99 / 118.297 ms maximum. Thermal status stayed green and the enabled
+phase's final hottest CPU reading was 58.2 C. These remain sequential stationary
+measurements, not moving-vehicle or USB-fault validation.
+
+Complete samples and analysis are retained in `live-reuse-every-frame`. The
+supervisor then resumed continuous stationary display with per-frame admission.
+The CPU output worker was again observed on CPU 4 with ordinary scheduling and
+no GPU device descriptors. The badge's milliseconds describe one result's
+pipeline latency, whereas its count is cumulative completed GPU runs; neither
+number alone specifies the result rate.
+
+The Web overlay keeps a previous valid result for at most 350 ms when frames
+are skipped. A new valid result with no detections replaces its boxes immediately;
+confidence threshold crossings can therefore flicker without any skipped
+inference. Expiry, camera-time mismatch and fetch failures can also hide boxes.
+The browser schedules its next fetch 150 ms after a response, so it does not
+display every result at the measured 11.62 Hz. These code paths identify possible
+causes, not a synchronized diagnosis of the owner's observed screen.
+The fixed input shape keeps neural-network work independent of how many objects
+are visible. CPU candidate filtering/NMS can cost more with more candidates;
+the decoder caps this at 200 candidates and 40 final detections. Dense-scene
+timing was not measured in this stationary comparison.
 
 ## Recovery and validation limits
 
