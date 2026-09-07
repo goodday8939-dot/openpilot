@@ -39,7 +39,13 @@ tests are required before creating the commissioning marker. A runtime above
 from repeatedly resubmitting failing optional work.
 
 `qcom_yolo_prepare.py` compiles from a saved NV12 frame while offroad, with
-camera, driving, DM and YOLO processes stopped. It verifies the existing ONNX checksum, tests
+camera, driving, DM and YOLO processes stopped. The explicitly requested
+`--stationary-maintenance` mode also allows ignition ON after a maintenance
+manager stops the camera, inference and control processes. It requires fresh
+manager/device/car state, standstill, speed below 0.01 m/s and gear Park.
+The maintenance coordinator continuously monitors these conditions and restores
+the normal manager after completion or failure. No ignition or motion-control
+command is issued. It verifies the existing ONNX checksum, tests
 serialization, and writes a separate QCOM artifact/report. It does not enable
 the worker. The NAS model and the eGPU driving artifacts are unchanged.
 QCOM needs branch-join materialization for YOLO: its compiler rejected a fused
@@ -160,8 +166,10 @@ preserves the available CPU affinity when power management has CPUs 4-7 offline.
 A final Qualcomm-compiler FP16 Winograd trial was terminated by the supervisor
 when the vehicle returned onroad. It produced no completed latency or numerical
 result. The selected 66.64 ms IR3 candidate had already completed and remains
-available; final compilation with the production adapter must wait for cameras
-to stop. No commissioning marker was created by any saved-frame trial.
+available. The owner then requested stopping the processes remotely while
+leaving ignition on; the explicit stationary-maintenance path keeps the camera
+stop requirement and adds stopped-control and live Park-state checks.
+No commissioning marker was created by any saved-frame trial.
 
 ## Historical shared-eGPU execution and image coordinates
 

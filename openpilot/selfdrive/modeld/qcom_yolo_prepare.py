@@ -12,16 +12,21 @@ import time
 import numpy as np
 
 
-def check_maintenance_state(processes, *, onroad, driver_preview):
-  if onroad:
+def check_maintenance_state(processes, *, onroad, driver_preview, stationary_maintenance=False, parked=False):
+  if onroad and not (stationary_maintenance and parked):
     raise RuntimeError('offroad required for maintenance compilation')
-  if any(p.running and p.name in ('camerad', 'modeld', 'dmonitoringmodeld', 'dmonitoringd', 'qcom_yolod') for p in processes):
+  stopped = {'camerad', 'modeld', 'dmonitoringmodeld', 'dmonitoringd', 'qcom_yolod'}
+  if stationary_maintenance:
+    if not parked:
+      raise RuntimeError('fresh stationary park state required for maintenance')
+    stopped.update(('controlsd', 'selfdrived', 'joystickd', 'maneuversd', 'lateral_maneuversd'))
+  if any(p.running and p.name in stopped for p in processes):
     raise RuntimeError('stop camera/driving/DM/YOLO processes before compiling')
   if driver_preview:
     raise RuntimeError('close driver camera preview before compiling')
 
 
-def compile_model(directory, input_nv12, camera_size, samples=60):
+def compile_model(directory, input_nv12, camera_size, samples=60, stationary_maintenance=False):
   from openpilot.selfdrive.modeld.qcom_yolo_model import BACKEND, configure_environment
   configure_environment(directory)
   from openpilot.cereal import messaging
@@ -35,7 +40,7 @@ def compile_model(directory, input_nv12, camera_size, samples=60):
   from tinygrad.nn.onnx import OnnxRunner
   configure_compiler()
 
-  sm = messaging.SubMaster(['managerState'])
+  sm = messaging.SubMaster(['managerState', 'deviceState'] + (['carState'] if stationary_maintenance else []))
   deadline = time.monotonic() + 5
   while time.monotonic() < deadline:
     sm.update(100)
@@ -44,8 +49,11 @@ def compile_model(directory, input_nv12, camera_size, samples=60):
   if not sm.all_checks():
     raise RuntimeError('fresh manager state required for maintenance compilation')
   params = Params()
-  check_maintenance_state(sm['managerState'].processes, onroad=params.get_bool('IsOnroad'),
-                          driver_preview=params.get_bool('IsDriverViewEnabled'))
+  parked = (stationary_maintenance and sm['carState'].standstill and abs(sm['carState'].vEgo) < .01
+            and str(sm['carState'].gearShifter) == 'park')
+  check_maintenance_state(sm['managerState'].processes, onroad=params.get_bool('IsOnroad') or sm['deviceState'].started,
+                          driver_preview=params.get_bool('IsDriverViewEnabled'),
+                          stationary_maintenance=stationary_maintenance, parked=parked)
   manifest = json.loads((directory / 'manifest.json').read_text())
   source = directory / 'model.onnx'
   if hashlib.sha256(source.read_bytes()).hexdigest() != manifest['sha256']:
@@ -100,8 +108,11 @@ def main():
   parser.add_argument('--input-nv12', type=Path, required=True)
   parser.add_argument('--camera-width', type=int, required=True)
   parser.add_argument('--camera-height', type=int, required=True)
+  parser.add_argument('--stationary-maintenance', action='store_true',
+                      help='allow ignition ON only with fresh park state and stopped camera/inference/control processes')
   args = parser.parse_args()
-  compile_model(args.directory, args.input_nv12, (args.camera_width, args.camera_height))
+  compile_model(args.directory, args.input_nv12, (args.camera_width, args.camera_height),
+                stationary_maintenance=args.stationary_maintenance)
 
 
 if __name__ == '__main__':

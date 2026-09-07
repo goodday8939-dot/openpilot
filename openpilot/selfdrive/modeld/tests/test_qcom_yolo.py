@@ -149,6 +149,24 @@ def test_compilation_rejects_onroad_and_driver_preview_even_without_live_process
     check_maintenance_state([], onroad=onroad, driver_preview=preview)
 
 
+def test_stationary_maintenance_requires_explicit_mode_and_park():
+  from openpilot.selfdrive.modeld.qcom_yolo_prepare import check_maintenance_state
+  for mode, parked in ((False, True), (True, False)):
+    with pytest.raises(RuntimeError):
+      check_maintenance_state([], onroad=True, driver_preview=False, stationary_maintenance=mode, parked=parked)
+  check_maintenance_state([], onroad=True, driver_preview=False, stationary_maintenance=True, parked=True)
+
+
+@pytest.mark.parametrize('name', ['camerad', 'modeld', 'dmonitoringmodeld', 'dmonitoringd', 'qcom_yolod',
+                                  'controlsd', 'selfdrived', 'joystickd', 'maneuversd', 'lateral_maneuversd'])
+def test_stationary_maintenance_never_allows_live_camera_inference_or_controls(name):
+  from types import SimpleNamespace
+  from openpilot.selfdrive.modeld.qcom_yolo_prepare import check_maintenance_state
+  with pytest.raises(RuntimeError, match='stop camera'):
+    check_maintenance_state([SimpleNamespace(name=name, running=True)], onroad=True, driver_preview=False,
+                            stationary_maintenance=True, parked=True)
+
+
 def test_runner_uses_winograd_for_unit_onnx_strides_without_changing_global_ops(monkeypatch):
   from types import SimpleNamespace
   from tinygrad import Tensor, dtypes
