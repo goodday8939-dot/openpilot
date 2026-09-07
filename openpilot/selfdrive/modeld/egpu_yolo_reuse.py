@@ -63,11 +63,12 @@ class ReuseRuntime(YoloRuntime):
                     transform, camera_size, next_frame_ready, inference_started, inference_ended, *, permitted):
     from openpilot.cereal import messaging
     self.budget.observe(frame_id, sof_ns/1e9, received, dropped)
-    if not permitted or not read_session():
+    if not permitted or not read_session(enabled=False):
       return
-    pending = next_frame_ready()
+    enabled = read_session()
+    pending = next_frame_ready() if enabled else False
     start = camera_time()
-    reason = self.budget.admit(start, pending)
+    reason = self.budget.admit(start, pending) if enabled else 'paused'
     detections = []
     if reason == 'run':
       try:
