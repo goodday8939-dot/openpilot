@@ -20,12 +20,13 @@ def test_full_cpu_output_socket_skips_without_waiting():
     worker.send({'frame': 2})
 
 
-def test_cpu_decoder_keeps_originating_frame_and_maps_only_its_transform(monkeypatch):
+@pytest.mark.parametrize('dtype', [np.float32, np.float16])
+def test_cpu_decoder_keeps_originating_frame_and_maps_only_its_transform(monkeypatch, dtype):
   from openpilot.selfdrive.modeld import egpu_yolo
   timestamps = iter([100., 100.001, 100.002])
   monkeypatch.setattr(egpu_yolo, 'camera_time', lambda: next(timestamps))
   metadata = {'frameId': 321, 'state': 'run', 'detections': []}
-  values = np.zeros((1, 6, 2688), dtype=np.float32)
+  values = np.zeros((1, 6, 2688), dtype=dtype)
   values[0, :, 0] = [256, 128, 100, 60, .8, 1]
   result = decode_packet((metadata, values, np.eye(3)*2, (1024, 512), ['person', 'bicycle'], 0.))
   assert result['frameId'] == 321

@@ -35,10 +35,11 @@ def decode_packet(packet):
   metadata, values, transform, size, names, started = packet
   if values is None:
     return metadata
-  if values.shape != (1, 6, 2688) or values.dtype != np.float32:
-    raise ValueError('native compact FP32 output required')
+  if values.shape != (1, 6, 2688) or values.dtype not in (np.float32, np.float16):
+    raise ValueError('native compact FP32 or FP16 output required')
   cpu_start = camera_time()
-  detections = decode_detections(values, 512, 256, compact=True)
+  # Keep transport compact, but run filtering/NMS in FP32 on this CPU worker.
+  detections = decode_detections(values.astype(np.float32, copy=False), 512, 256, compact=True)
   for detection in detections:
     detection['label'] = names[detection['classId']]
   metadata['detections'] = camera_detections(detections, np.asarray(transform), (512, 256), size)

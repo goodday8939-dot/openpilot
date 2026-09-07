@@ -101,7 +101,7 @@ def main():
       submitted = time.perf_counter()
       raw = read_yolo(raw_tensor)
       read = time.perf_counter()
-      decode_detections(raw, 512, 256, compact=True)
+      decode_detections(raw.astype(np.float32, copy=False), 512, 256, compact=True)
       end = time.perf_counter()
       value['samples'].append([(submitted-start)*1000, (read-submitted)*1000, (end-read)*1000, (end-start)*1000])
     if (index+1) % 500 == 0:

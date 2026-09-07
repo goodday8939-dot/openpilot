@@ -42,8 +42,8 @@ class ReuseRuntime(YoloRuntime):
       bundle = load_oob(stream)
     if bundle.get('input_rebinding_passed') is not True:
       raise ValueError('reuse artifact must prove changing input allocation and pixels')
-    if bundle.get('output_dtype') != 'float32':
-      raise ValueError('CPU delivery expects compact FP32 output')
+    if bundle.get('output_dtype') not in ('float32', 'float16'):
+      raise ValueError('CPU delivery expects compact FP32 or FP16 output')
     if not bundle.get('native') or (bundle['width'], bundle['height']) != (input_queue.shape[-1]*2, input_queue.shape[-2]*2):
       raise ValueError('reuse artifact must retain native driving input resolution')
     # This is a compiled artifact replay on the driving owner's startup thread.

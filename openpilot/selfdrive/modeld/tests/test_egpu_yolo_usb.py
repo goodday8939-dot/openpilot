@@ -101,16 +101,14 @@ def test_timeline_rollover_is_handled_before_submitting_copy():
 def test_driving_graph_factory_restored_after_optional_run(monkeypatch, fail):
   from tinygrad import device as device_module
   from openpilot.selfdrive.modeld import egpu_yolo_usb
-  device = SimpleNamespace(graph="driving", hw_compute_queue_t=object)
+  device = SimpleNamespace(graph="driving")
   monkeypatch.setattr(device_module, "Device", {"AMD": device})
   monkeypatch.setattr(egpu_yolo_usb, "custom_usb", lambda d: True)
   monkeypatch.setattr(egpu_yolo_usb, "serial_graph_type", lambda: "yolo")
-  monkeypatch.setattr(egpu_yolo_usb, "batched_compute_type", lambda base: 'yolo compute')
   queue = SimpleNamespace(device="AMD")
 
   def run(**kwargs):
     assert kwargs["queue"] is queue and device.graph == "yolo"
-    assert device.hw_compute_queue_t == 'yolo compute'
     if fail:
       raise RuntimeError("optional initialization failed")
     return "output"
@@ -121,37 +119,37 @@ def test_driving_graph_factory_restored_after_optional_run(monkeypatch, fail):
   else:
     assert egpu_yolo_usb.run_yolo(run, queue) == "output"
   assert device.graph == "driving"
-  assert device.hw_compute_queue_t is object
 
 
-@pytest.mark.parametrize('position', [0, 5, 6, 7, 15])
-def test_batched_indirect_packet_preserves_wrap_order_and_doorbell(position):
-  import array
-  from openpilot.selfdrive.modeld.egpu_yolo_usb import submit_bound_compute
-  ring = array.array('I', [99]*8)
-  expected = ring[:]
-  commands = [10, 20, 30, 40]
-  for i, value in enumerate(commands):
-    expected[(position+i) % len(ring)] = value
-  snapshots = []
-  compute = SimpleNamespace(ring=ring, put_value=position)
-  compute.signal_doorbell = lambda dev: snapshots.append((ring[:], dev.compute_queue.put_value))
-  submit_bound_compute(SimpleNamespace(indirect_cmd=commands), SimpleNamespace(compute_queue=compute))
-  assert snapshots == [(expected, position+len(commands))]
+def test_replay_cache_reads_changed_pixels_and_revalidates_new_inputs():
+  from tinygrad import Tensor, TinyJit
+  from openpilot.selfdrive.modeld.egpu_yolo_usb import replay_yolo
+  run = TinyJit(lambda queue: (queue+1).realize())
+  queue = Tensor([1., 2.]).realize()
+  for _ in range(3):
+    np.testing.assert_array_equal(replay_yolo(run, queue).numpy(), [2., 3.])
+  queue.assign(Tensor([5., 6.])).realize()
+  np.testing.assert_array_equal(replay_yolo(run, queue).numpy(), [6., 7.])
+  other = Tensor([8., 9.]).realize()
+  np.testing.assert_array_equal(replay_yolo(run, other).numpy(), [9., 10.])
+  from tinygrad.engine.jit import JitError
+  with pytest.raises(JitError):
+    replay_yolo(run, other.reshape(1, 2))
+  # Failed validation must not replace the previously validated input.
+  np.testing.assert_array_equal(replay_yolo(run, other).numpy(), [9., 10.])
 
 
-@pytest.mark.parametrize('bound,xccs,usb', [(False, 1, True), (True, 2, True), (True, 1, False)])
-def test_other_compute_modes_keep_original_submission(monkeypatch, bound, xccs, usb):
-  from openpilot.selfdrive.modeld import egpu_yolo_usb
-  calls = []
-
-  class Base:
-    def _submit(self, dev):
-      calls.append(dev)
-
-  device = SimpleNamespace(xccs=xccs)
-  queue = egpu_yolo_usb.batched_compute_type(Base)()
-  queue.binded_device = device if bound else None
-  monkeypatch.setattr(egpu_yolo_usb, 'custom_usb', lambda dev: usb)
-  queue._submit(device)
-  assert calls == [device]
+def test_replay_cache_does_not_survive_jit_reset_or_serialization():
+  import pickle
+  from tinygrad import Tensor, TinyJit
+  from openpilot.selfdrive.modeld.egpu_yolo_usb import replay_yolo
+  run = TinyJit(lambda queue: (queue*2).realize())
+  queue = Tensor([3.]).realize()
+  for _ in range(3):
+    replay_yolo(run, queue)
+  restored = pickle.loads(pickle.dumps(run))
+  assert not hasattr(restored, '_yolo_validated_input')
+  np.testing.assert_array_equal(replay_yolo(restored, Tensor([7.]).realize()).numpy(), [14.])
+  run.reset()
+  for _ in range(3):
+    np.testing.assert_array_equal(replay_yolo(run, queue).numpy(), [6.])
