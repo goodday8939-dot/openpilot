@@ -88,6 +88,12 @@ def compile_model(directory: Path):
   for _ in range(3):
     raw = run(queue=queue)
     raw.numpy()
+  # Match modeld's CPU affinity and scheduling for the synchronous GPU
+  # submission/readback benchmark; compile itself can use ordinary scheduling.
+  from openpilot.common.realtime import config_realtime_process
+  config_realtime_process(7, 54)
+  for _ in range(5):
+    decode_detections(run(queue=queue).numpy(), width, height, compact=True)
   elapsed = []
   for _ in range(30):
     start = time.monotonic()

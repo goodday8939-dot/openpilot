@@ -32,8 +32,8 @@ use frame IDs when available, otherwise a bounded latest-result fallback.
 
 Twenty consecutive camera frames establish cadence. The next arrival deadline
 and web result expiry use the camera's CLOCK_BOOTTIME domain, including suspend.
-The deadline
-uses the earliest observed SOF-to-receive offset over 120 frames, capped by
+The deadline uses the earliest observed SOF-to-complete-input-pair offset over
+120 frames (after waiting for the synchronized extra camera), capped by
 receive time plus 50 ms. A late receive does not grant another free 50 ms.
 Frame gaps, timestamp jumps, and dropped frames restart settling.
 
@@ -68,7 +68,8 @@ python -m openpilot.selfdrive.modeld.egpu_yolo_prepare compile
 ```
 
 Compilation keeps the driving weights resident, records 30 completed YOLO
-runs including readback/NMS, and verifies the serialized JIT round trip.
+runs including readback/NMS with modeld's CPU 7 / FIFO 54 scheduling, and
+verifies the serialized JIT round trip.
 `/data/egpu_yolo/yolo.pkl` activates the runtime on the next modeld start.
 The source fingerprint and driving queue shape must match. Loading and warmup
 happen at initialization, never in an idle time slot. Runtime errors disable

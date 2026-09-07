@@ -32,6 +32,21 @@ def test_late_camera_receive_does_not_create_false_free_time():
   assert budget.admit(101.300) == "no_budget"
 
 
+def test_budget_uses_complete_camera_pair_readiness():
+  budget = IdleBudget(.004)
+  for frame in range(25):
+    sof = 100 + frame * .05
+    budget.observe(frame, sof, sof + .055)
+  assert budget.admit(sof + .090) == "run"
+  tree = ast.parse((Path(__file__).parents[1] / "modeld.py").read_text())
+  extra_recv = max(node.lineno for node in ast.walk(tree) if isinstance(node, ast.Call)
+                   and isinstance(node.func, ast.Attribute) and node.func.attr == "recv"
+                   and isinstance(node.func.value, ast.Name) and node.func.value.id == "vipc_client_extra")
+  ready = next(node.lineno for node in ast.walk(tree) if isinstance(node, ast.Assign)
+               and any(isinstance(t, ast.Name) and t.id == "yolo_frame_received" for t in node.targets))
+  assert ready > extra_recv
+
+
 def test_overrun_disables_subsequent_gpu_submission():
   budget = settled_budget()
   start = budget.deadline - .025

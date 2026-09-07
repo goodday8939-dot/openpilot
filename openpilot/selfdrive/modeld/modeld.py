@@ -404,8 +404,6 @@ def main(demo=False):
       cloudlog.debug("vipc_client_main no frame")
       continue
 
-    yolo_frame_received = camera_time()
-
     if use_extra_client:
       # Keep receiving extra frames until frame id matches main camera
       while True:
@@ -426,6 +424,10 @@ def main(demo=False):
       # Use single camera
       buf_extra = buf_main
       meta_extra = meta_main
+
+    # Driving inference needs both synchronized cameras. Track readiness of
+    # the complete input pair, including the wait for the extra camera.
+    yolo_frame_received = camera_time()
 
     sm.update(0)
     desire = DH.desire
