@@ -12,6 +12,15 @@ import time
 import numpy as np
 
 
+def check_maintenance_state(processes, *, onroad, driver_preview):
+  if onroad:
+    raise RuntimeError('offroad required for maintenance compilation')
+  if any(p.running and p.name in ('camerad', 'modeld', 'dmonitoringmodeld', 'dmonitoringd', 'qcom_yolod') for p in processes):
+    raise RuntimeError('stop camera/driving/DM/YOLO processes before compiling')
+  if driver_preview:
+    raise RuntimeError('close driver camera preview before compiling')
+
+
 def compile_model(directory, input_nv12, camera_size, samples=60):
   os.environ.update(DEV='QCOM', WARP_DEV='QCOM', IMAGE='0', FLOAT16='1', NOLOCALS='1',
                     JIT_BATCH_SIZE='0', OPENPILOT_HACKS='1')
@@ -34,10 +43,9 @@ def compile_model(directory, input_nv12, camera_size, samples=60):
       break
   if not sm.all_checks():
     raise RuntimeError('fresh manager state required for maintenance compilation')
-  if any(p.running and p.name in ('modeld', 'dmonitoringmodeld', 'qcom_yolod') for p in sm['managerState'].processes):
-    raise RuntimeError('stop driving/DM/YOLO processes before compiling')
-  if Params().get_bool('IsDriverViewEnabled'):
-    raise RuntimeError('close driver camera preview before compiling')
+  params = Params()
+  check_maintenance_state(sm['managerState'].processes, onroad=params.get_bool('IsOnroad'),
+                          driver_preview=params.get_bool('IsDriverViewEnabled'))
   manifest = json.loads((directory / 'manifest.json').read_text())
   source = directory / 'model.onnx'
   if hashlib.sha256(source.read_bytes()).hexdigest() != manifest['sha256']:

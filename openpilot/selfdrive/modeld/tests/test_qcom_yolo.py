@@ -101,3 +101,19 @@ def test_runner_compacts_class_scores_after_nv12_conversion():
 
   raw = make_runner(Runner(), (4, 4, 4, 4, 2, 24), (4, 4))(Tensor(np.full(24, 128, dtype=np.uint8))).numpy()
   np.testing.assert_allclose(raw.flatten(), [2, 2, 1, 1, .8, 1], atol=1e-6)
+
+
+@pytest.mark.parametrize('name', ['camerad', 'modeld', 'dmonitoringmodeld', 'dmonitoringd', 'qcom_yolod'])
+def test_compilation_rejects_live_camera_and_inference_processes(name):
+  from types import SimpleNamespace
+  from openpilot.selfdrive.modeld.qcom_yolo_prepare import check_maintenance_state
+  with pytest.raises(RuntimeError, match='stop camera'):
+    check_maintenance_state([SimpleNamespace(name=name, running=True)], onroad=False, driver_preview=False)
+  check_maintenance_state([SimpleNamespace(name=name, running=False)], onroad=False, driver_preview=False)
+
+
+@pytest.mark.parametrize('onroad,preview', [(True, False), (False, True)])
+def test_compilation_rejects_onroad_and_driver_preview_even_without_live_processes(onroad, preview):
+  from openpilot.selfdrive.modeld.qcom_yolo_prepare import check_maintenance_state
+  with pytest.raises(RuntimeError):
+    check_maintenance_state([], onroad=onroad, driver_preview=preview)

@@ -35,11 +35,11 @@ preempt an in-flight GPU kernel. QCOM still serves the driving image warp and
 UI, and must take over driving inference if the eGPU fails. Therefore process
 separation is not a guarantee of timing isolation. Compilation and live A/B
 tests are required before creating the commissioning marker. A runtime above
-100 ms or an execution error writes `qcom_fault`, preventing manager restarts
+40 ms or an execution error writes `qcom_fault`, preventing manager restarts
 from repeatedly resubmitting failing optional work.
 
-`qcom_yolo_prepare.py` compiles from a saved NV12 frame while driving, DM and
-YOLO processes are stopped. It verifies the existing ONNX checksum, tests
+`qcom_yolo_prepare.py` compiles from a saved NV12 frame while offroad, with
+camera, driving, DM and YOLO processes stopped. It verifies the existing ONNX checksum, tests
 serialization, and writes a separate QCOM artifact/report. It does not enable
 the worker. The NAS model and the eGPU driving artifacts are unchanged.
 QCOM needs branch-join materialization for YOLO: its compiler rejected a fused
@@ -50,6 +50,43 @@ current preparation uses `IMAGE=0`. The dedicated compiler also assigns legal
 workgroups of at most 64 threads to kernels without an explicit local size,
 instead of exhaustively benchmarking hundreds of local sizes per kernel.
 The compiler override is process-local and is not installed in modeld.
+
+### Internal GPU measurements and camera recovery (2026-09-07)
+
+The 512 x 256 YOLOv8n FP32 buffer implementation completed 60 standalone runs:
+223.67 ms p50, 238.54 ms p95, 242.97 ms p99 and 246.67 ms maximum. Serialization
+and reload passed. An independent NumPy NV12 conversion and ONNX Runtime check
+on the same saved image found maximum RGB error 4.49e-6 and maximum box/score
+error 0.00301; classes agreed for the three anchors above confidence 0.35.
+This is one-image numerical validation, not detection-accuracy validation.
+
+A separate profile measured median submission 1.34 ms, GPU wait 221.59 ms,
+readback 0.76 ms and NMS 0.59 ms. One captured graph contained 172 kernels
+spanning 220.53 ms. Individual preprocessing and convolution timings were not
+retained, so this profile does not establish how much NV12 conversion costs.
+Input is already NV12, but the existing network still receives RGB after GPU
+preprocessing; it is not a network trained directly on YUV. These measurements
+describe this compiler path, not an upper bound on internal-GPU performance.
+
+A subsequent FP16 buffer compilation was interrupted after a reported camera
+frame-rate warning. Its maintenance log contains repeated camera request skips
+and encoder dequeue timeouts. No completed FP16 latency or correctness result
+exists, and the FP16 prototype is not part of the deployed runner. The exact
+CPU/GPU/driver contribution to the camera stalls was not isolated. Compilation
+with live cameras must not be repeated; the preparation tool now rejects it.
+
+After terminating the compiler and restoring the normal manager, a 20-second
+read-only sample measured approximately 20 Hz for all three camera services
+and the driving model, with no displayed alert or camera error event. The last
+model sample reported zero frame drops and 37.07 ms execution. This recovery
+sample does not validate running YOLO alongside driving.
+
+The compiled FP32 artifact is retained for offline investigation, but
+`qcom_enabled` remains absent and the historical shared-eGPU artifact is retired.
+The requested ceiling is now 40 ms per complete YOLO frame. The measured
+artifact fails that ceiling and must not be commissioned. The runtime limit
+stops subsequent work after a slow completion; it cannot cancel an in-flight
+kernel. Passing 40 ms alone would still require a camera/driving latency check.
 
 ## Historical shared-eGPU execution and image coordinates
 
