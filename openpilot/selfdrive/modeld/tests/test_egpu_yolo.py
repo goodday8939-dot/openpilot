@@ -218,3 +218,22 @@ def test_gpu_adapter_returns_compact_results_and_consumes_newest_queue_frame():
   assert result.shape == (1, 6, 2)
   assert (result[0, 5] == 1).all()
   assert result[0, 0, 0] < 20.01
+
+
+def test_native_color_kernel_preserves_full_luma_parity_and_chroma():
+  from tinygrad import Tensor
+  from openpilot.selfdrive.modeld.egpu_yolo_model import native_packed_yuv_to_rgb, packed_yuv_to_rgb
+  values = np.random.default_rng(42).integers(0, 256, (6, 8, 16), dtype=np.uint8)
+  frame = Tensor(values)
+  actual = native_packed_yuv_to_rgb(frame).numpy()
+  expected = packed_yuv_to_rgb(frame, (16, 32)).numpy()
+  np.testing.assert_allclose(actual, expected, atol=1e-6)
+
+
+def test_native_runner_refuses_to_resize_an_existing_driving_image():
+  from types import SimpleNamespace
+  from tinygrad import Tensor, dtypes
+  from openpilot.selfdrive.modeld.egpu_yolo_model import make_yolo_runner
+  runner = SimpleNamespace(graph_inputs={'images': SimpleNamespace(shape=(1, 3, 4, 8), dtype=dtypes.float32)})
+  with pytest.raises(ValueError, match='cannot resize'):
+    make_yolo_runner(runner, 8, 4, native=True)(Tensor.zeros(2, 6, 4, 8, dtype='uint8'))

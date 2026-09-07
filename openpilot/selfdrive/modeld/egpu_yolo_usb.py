@@ -37,13 +37,14 @@ def read_yolo(raw):
   from tinygrad.device import Device
   from tinygrad import dtypes
   device = Device[raw.device]
-  nbytes = raw.numel() * 4
-  if not custom_usb(device) or raw.dtype != dtypes.float32 or nbytes > device.allocator.b[0].size:
+  nbytes = raw.numel() * raw.dtype.itemsize
+  if not custom_usb(device) or raw.dtype not in (dtypes.float16, dtypes.float32) or nbytes > device.allocator.b[0].size:
     return raw.numpy()
-  return read_usb_output(device, raw.uop.buffer._buf, nbytes, raw.shape)
+  dtype = np.float16 if raw.dtype == dtypes.float16 else np.float32
+  return read_usb_output(device, raw.uop.buffer._buf, nbytes, raw.shape, dtype=dtype)
 
 
-def read_usb_output(device, source, nbytes: int, shape):
+def read_usb_output(device, source, nbytes: int, shape, *, dtype=np.float32):
   if device.error_state is not None:
     raise device.error_state
   if device.timeline_value > 1 << 31:
@@ -56,4 +57,4 @@ def read_usb_output(device, source, nbytes: int, shape):
     .copy(staging, source, nbytes).write(device.iface.cq_buf.offset(12), 0) \
     .signal(device.timeline_signal, device.next_timeline()).submit(device)
   data = staging.cpu_view().view(size=nbytes, fmt="B")[:]
-  return np.frombuffer(data, dtype=np.float32).reshape(shape).copy()
+  return np.frombuffer(data, dtype=dtype).reshape(shape).copy()

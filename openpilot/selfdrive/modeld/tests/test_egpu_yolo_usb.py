@@ -71,6 +71,16 @@ def test_device_fault_does_not_submit_optional_work():
   assert events == []
 
 
+def test_half_precision_output_reads_half_the_bytes_without_changing_class_ids():
+  device, events, data = device_for_readback()
+  values = np.array([320, 128, 50, 40, .84, 79], dtype=np.float16)
+  data[:] = values.tobytes()
+  result = read_usb_output(device, 'output', 12, (1, 6), dtype=np.float16)
+  assert result.dtype == np.float16
+  np.testing.assert_array_equal(result, values.reshape(1, 6))
+  assert events[0] == ('arm', 12) and events[-1] == ('read', 12)
+
+
 def test_timeline_rollover_is_handled_before_submitting_copy():
   device, events, _ = device_for_readback()
   device.timeline_value = (1 << 31) + 1
