@@ -11,7 +11,7 @@ After all three driving publications, modeld may run YOLOv8n on the newest
 `img_q` frame, already resident on the same USB AMD device. Its packed YUV420
 input is four luma parity planes plus U and V. The adapter reconstructs luma,
 upsamples chroma and uses the camera renderer's full-range conversion matrix,
-then bilinearly resizes to 192 x 96 RGB on the GPU. The original 80 COCO classes
+then bilinearly resizes to 320 x 160 RGB on the GPU. The original 80 COCO classes
 are preserved (a traffic-light class does not classify its signal color).
 
 There is no second image transfer or preview stream. The GPU reduces output to
@@ -48,11 +48,7 @@ The actual eGPU must be measured before this is considered validated for use.
 On a workstation, use `openpilot/tools/egpu_yolo/export_model.py` with the
 official YOLOv8n `.pt`. The tool exports a static ONNX and checks three input
 outputs against CPU PyTorch. Publish verified `big_driving_supercombo.onnx` and `manifest.json`
-under `\\DS1821P\openpilot\models\carrot-egpu-yolo-192x96`. Use `--width 192`
-and the matching `--model-base-url` when exporting. The initial 320 x 160
-model remains available under `carrot-egpu-yolo`; its measured 7.5–8.6 ms
-runtime plus admission margin did not fit the available post-publication slots
-on the stationary Cinque Terre commissioning vehicle.
+under `\\DS1821P\openpilot\models\carrot-egpu-yolo`.
 The NAS endpoint only serves its established ONNX filename. In this separate
 directory that file contains YOLO, and is installed as `/data/egpu_yolo/model.onnx`.
 
