@@ -79,6 +79,61 @@ projection path. This is a saved synthetic-box CPU microbenchmark, not a dense
 live-scene result or a reduction in neural-network GPU time. Tests compare the
 old/new projection across box counts, perspective transforms and invalid depths.
 
+### Post-reboot stationary validation
+
+The owner reported micd/general lag and suggested reboot. Before reboot the
+device load average was 16.24/11.76/12.10 with about 1.1 GB available memory.
+After a fresh Park/standstill/disabled check, a device reboot restored
+`UsbGpuActive=1`; a 20-second read-only check observed about 20 Hz on the driving
+model and all three cameras, no driving drops and no alerts. The owner confirmed
+the lag improved. These observations do not establish the original lag's cause.
+`ShareData=0` remained unchanged.
+
+The supervisor also now starts new frequency history after deliberately
+restarting the manager and records preparation checks every five seconds. A
+prior startup timed out without a prepared YOLO owner; retaining the old
+manager-stop interval in the new epoch's frequency history was an avoidable
+preparation failure mode. The new startup succeeded without changing active
+inference admission or camera/model timing limits.
+
+Runtime commit `d170013064` completed another 30/180/30-second stationary trial:
+
+| Metric | Baseline | YOLO enabled | Recovery |
+| --- | ---: | ---: | ---: |
+| Driving model p50 / p99 / max, ms | 36.18 / 37.73 / 38.42 | 36.04 / 37.53 / 38.67 | 36.11 / 37.93 / 39.14 |
+| Maximum driving publication gap, ms | 76.45 | 76.87 | 70.35 |
+| Reported driving drops | 0 | 0 | 0 |
+| Maximum consecutive observed frame-ID delta, all streams | 1 | 1 | 1 |
+
+The enabled window received 2,248 YOLO results in 180.014 seconds (12.49 Hz),
+with zero YOLO overruns. GPU submission plus completion/readback measured
+4.336 / 4.663 / 5.008 ms p50/p99/max; full result latency was
+6.889 / 14.331 / 34.355 ms, including CPU postprocessing at
+0.730 / 5.246 / 27.225 ms. Thus CPU/delivery tail latency is still present.
+The enabled observer retained 3,598 messages for each primary/camera stream
+(window/drain boundaries), with no internal frame-ID gaps; baseline retained
+600 each, recovery 600 each except 599 wide-camera messages. Camera maximum
+gaps were below 66 ms during enabled observation. Thermal status stayed green,
+with a maximum reported CPU temperature of 53.6 C at the enabled-window end.
+
+An actual Chrome live-camera check showed the bicycle box labelled `#6 bicycle`
+and the Korean corner-only radar status, with no distance attached. A separate
+30.18-second Web API sample completed 143 requests without errors: 111 distinct
+fresh frames, all showing bicycle ID 6, and zero radar candidates. Earlier
+observations in the session had six created IDs; identity may expire after a
+longer miss and is not claimed continuous across the entire trial. The CPU
+worker ran ordinary scheduling on CPU4 with no GPU device descriptors.
+
+These are sequential stationary observations with a browser video client
+started during the enabled window, not a controlled old/new optimization A/B.
+The dense-box benefit is established only by the separate CPU microbenchmark.
+Automatic timing-recovery sequencing, backoff, exhaustion and refusal on changed
+guards passed focused tests; the successful live trial had no fault triggering
+automatic recovery. Actual live fault recovery and moving front-radar matching
+remain unvalidated. The supervisor proceeded to bounded continuous display.
+Retained local evidence: `.cache/egpu-yolo/live-stage2/` and
+`.cache/egpu-yolo/stage2_stationary_capture.json`.
+
 The follow-up has completed the initial 640 x 384 saved-input eGPU measurement
 and independent numerical check. See [eGPU timing](egpu_yolo2_timing.md).
 Its 5,000 resident-input runs took 5.45 ms p50 / 6.24 ms p99 / 7.39 ms maximum,
