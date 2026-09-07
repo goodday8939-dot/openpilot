@@ -9,6 +9,58 @@ validated or enabled by this plan.
 
 ## Current baseline
 
+### Persistent automatic start and recovery (2026-09-08)
+
+The owner explicitly requested operation after every ignition cycle and recovery
+without pulling over. This supersedes the manual-session-only behavior below.
+On this separate experiment, `/data/egpu_yolo/auto_enabled.json` containing
+`{"version":1,"enabled":true}` opts the installed, verified native reuse artifact
+into automatic operation. It is a device-local experiment activation file, not
+a shared vehicle-control setting. The manager owns `egpu_yolo_supervisor`, an
+ordinary CPU0-3 process which remains available offroad and restarts if it exits.
+No network connection, manual command, four-hour allowance or periodic A/B pause
+is required for normal automatic use.
+
+The existing GPU owner prepares YOLO during its normal model startup even when
+the supervisor has not yet published a lease. Artifact fingerprint, shape and
+serialized rebinding checks still apply. Actual inference requires a fresh,
+current-boot, exact-owner lease, fresh onroad data and every existing per-frame
+deadline/budget/camera check. Startup uses the normal model lifecycle, not an
+additional manager or GPU process. No automatic recovery path restarts modeld,
+camerad, controls or the whole manager, nor compiles an artifact on live frames.
+
+Transient timing, message-validity, eGPU-ready and competing-process conditions
+revoke execution immediately but leave supervision running. It resumes after
+two uninterrupted healthy seconds whether the vehicle is in Park, stopped in
+Drive or moving with controls enabled. Repeated interruptions require 5, 10,
+then 30 healthy seconds; five minutes of healthy operation resets the backoff.
+There is no terminal three-retry limit. A completed YOLO deadline miss can clear
+its latch on a new recovery generation, retaining its worst-time reservation
+and cumulative overrun count. Failed GPU calls remain quarantined until a
+different normal model owner starts; restarting a shared GPU in traffic is not
+a recovery technique. A dead CPU-only decoder is restarted independently on
+CPU4 with bounded backoff and a nonblocking handoff; modeld skips optional GPU
+work while it is unavailable. Persistent GPU timing that cannot fit the budget
+still cannot be admitted merely because recovery was requested.
+
+154 focused tests cover repeated ignition cycles, supervisor-before/after-model
+startup ordering, stale-boot and wrong-owner leases, moving/engaged gates,
+continuous-health recovery, bounded repeated backoff without permanent exit,
+GPU-error quarantine, preserved budget and nonblocking CPU-worker replacement.
+Live deployment verification is recorded in the task handoff; these unit tests
+alone are not proof of moving-scene accuracy or every hardware fault outcome.
+
+The previous evening's saved fault window had a 160.123 ms **model publication
+gap**, not a 160 ms inference. Frames 6225 to 6228 skipped two model frame IDs;
+their model executions were 36.90 and 35.96 ms. All camera frame IDs in that
+window were continuous. The last YOLO result before the gap was frame 6223,
+5.73 ms full pipeline / about 4.39 ms GPU submission and readback, with no YOLO
+overrun. This does not identify why model input/host scheduling stalled. The
+old supervisor recovered after 30 seconds, but later exited permanently on a
+fresh-state guard change. Matching rlog/procLog is needed to distinguish CPU
+scheduling, buffer delivery and other host delays; the NAS did not yet contain
+the September 7 return trip at inspection time.
+
 ### Explicit road-observation session (2026-09-07 follow-up)
 
 The owner requested viewing and logging YOLO while driving. The supervisor now

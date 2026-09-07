@@ -4,10 +4,19 @@ import pickle
 import socket
 import subprocess
 import sys
+import threading
+import time
 
 
 class OutputWorker:
-  def __init__(self):
+  def __init__(self, *, recover=False):
+    self.recover = recover
+    self.lock = threading.Lock()
+    self._spawn()
+    if recover:
+      threading.Thread(target=self._watch, name='yolo-cpu-watch', daemon=True).start()
+
+  def _spawn(self):
     self.socket, child = socket.socketpair(socket.AF_UNIX, socket.SOCK_SEQPACKET)
     self.socket.setblocking(False)
     self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 131072)
@@ -17,8 +26,44 @@ class OutputWorker:
     finally:
       child.close()
 
+  def _watch(self):
+    # Only the CPU decoder is replaced. Never fork/reload the GPU owner from a
+    # recovery attempt, and never make the primary thread wait for this lock.
+    os.sched_setscheduler(0, os.SCHED_OTHER, os.sched_param(0))
+    os.sched_setaffinity(0, {4})
+    failures = 0
+    healthy_since = time.monotonic()
+    while True:
+      time.sleep(.5)
+      if self.process.poll() is None:
+        if time.monotonic()-healthy_since >= 60:
+          failures = 0
+        continue
+      time.sleep((2, 5, 10, 30)[min(failures, 3)])
+      with self.lock:
+        self.socket.close()
+        try:
+          self._spawn()
+        except OSError:
+          pass
+      failures += 1
+      healthy_since = time.monotonic()
+
   def send(self, packet):
+    if not self.lock.acquire(blocking=False):
+      return False
+    try:
+      return self._send(packet)
+    finally:
+      self.lock.release()
+
+  def ready(self):
+    return not self.lock.locked() and self.process.poll() is None
+
+  def _send(self, packet):
     if self.process.poll() is not None:
+      if self.recover:
+        return False
       raise RuntimeError('CPU-only YOLO output worker exited')
     data = pickle.dumps(packet, protocol=5)
     if len(data) > 131072:
@@ -27,6 +72,10 @@ class OutputWorker:
       return self.socket.send(data) == len(data)
     except BlockingIOError:
       return False
+    except (BrokenPipeError, ConnectionResetError):
+      if self.recover:
+        return False
+      raise
 
 
 def project_detections(detections, transform, model_size, camera_size):

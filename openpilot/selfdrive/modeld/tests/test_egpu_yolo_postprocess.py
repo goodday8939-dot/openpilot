@@ -7,7 +7,10 @@ from openpilot.selfdrive.modeld.egpu_yolo_postprocess import OutputWorker, decod
 
 
 def test_full_cpu_output_socket_skips_without_waiting():
+  import threading
   worker = OutputWorker.__new__(OutputWorker)
+  worker.lock = threading.Lock()
+  worker.recover = False
   worker.process = SimpleNamespace(poll=lambda: None)
 
   def full(data):

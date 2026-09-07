@@ -72,7 +72,7 @@ def status_payload(state: dict, directory: Path, now: float) -> dict:
   try:
     report = json.loads((directory / 'live_reuse_status.json').read_text())
     if 0 <= now-report.get('updated_camera_time', 0) < 10:
-      supervisor = {key: report.get(key) for key in ('stage', 'mode', 'reason', 'recovery_reason', 'retry_count', 'stable_seconds_required')}
+      supervisor = {key: report.get(key) for key in ('stage', 'mode', 'automatic', 'reason', 'recovery_reason', 'retry_count', 'stable_seconds_required')}
   except (OSError, ValueError, TypeError, AttributeError):
     pass
   return {"ok": True, "status": status, "frame": frame, "ageSeconds": age, "stale": age is None or age > .35,

@@ -1,6 +1,7 @@
 """Manually leased observation using the driving owner's existing eGPU queue."""
 import json
 import math
+import os
 
 from openpilot.selfdrive.modeld.egpu_yolo import YoloRuntime, artifact_path, camera_time
 
@@ -19,6 +20,10 @@ def leased(value, now, *, enabled=True):
 def read_session_details(*, enabled=True):
   try:
     value = json.loads(session_path().read_text())
+    if isinstance(value, dict) and value.get('automatic'):
+      from openpilot.selfdrive.modeld.egpu_yolo_auto import boot_id, configured
+      if not configured() or value.get('boot_id') != boot_id():
+        return None
     return value if isinstance(value, dict) and leased(value, camera_time(), enabled=enabled) else None
   except (OSError, ValueError, TypeError):
     return None
@@ -58,6 +63,11 @@ class ReuseRuntime(YoloRuntime):
     directory = artifact_path().parent
     target = directory / 'egpu2-reuse/yolo_reuse.pkl'
     session = read_session_details(enabled=False)
+    from openpilot.selfdrive.modeld.egpu_yolo_auto import configured
+    if session is None and configured():
+      # Prepare with the normal driving model startup, even if the supervisor
+      # has not started yet. A fresh owner-bound lease is still needed to run.
+      session = {'mode': 'road_observation', 'automatic': True}
     if session is None or not target.is_file() or (directory/'qcom_enabled').exists():
       return None
     from openpilot.selfdrive.modeld.helpers import load_oob
@@ -74,8 +84,10 @@ class ReuseRuntime(YoloRuntime):
     runtime = cls(input_queue, bundle)
     # Lock mode at startup; changing a lease cannot promote a stationary owner.
     runtime.mode = session.get('mode', 'stationary')
+    runtime.automatic = session.get('automatic') is True
+    runtime.generation = -1
     from openpilot.selfdrive.modeld.egpu_yolo_postprocess import OutputWorker
-    runtime.output = OutputWorker()
+    runtime.output = OutputWorker(recover=runtime.automatic)
     from openpilot.common.swaglog import cloudlog
     cloudlog.info('resident YOLO prepared: %s, required %.3f ms', bundle['variant'], runtime.budget.estimate*1000+.001*1000)
     return runtime
@@ -97,6 +109,19 @@ class ReuseRuntime(YoloRuntime):
     if not permitted or not read_session(enabled=False, mode=mode):
       return
     enabled = read_session(mode=mode)
+    if getattr(self, 'automatic', False):
+      lease = read_session_details(enabled=False)
+      if not lease or lease.get('automatic') is not True or lease.get('owner_pid') != os.getpid():
+        return
+      enabled = lease.get('enabled') is True
+      if not self.output.ready():
+        return
+      if enabled and lease.get('generation', -1) > self.generation and self.budget.settled >= 20:
+        self.generation = lease['generation']
+        # A completed deadline miss can recover. Keep the increased reservation
+        # and cumulative overrun count; never clear a failed GPU call's latch.
+        if self.budget.disabled_reason == 'overrun':
+          self.budget.disabled_reason = ''
     pending = next_frame_ready() if enabled else False
     start = camera_time()
     # Consider every completed primary frame. The camera/deadline/overrun
