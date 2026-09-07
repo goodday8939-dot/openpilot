@@ -340,7 +340,7 @@ def main(demo=False):
   # messaging
   pm = PubMaster(["modelV2", "drivingModelData", "cameraOdometry"] + (["carrotYolo"] if model.reuse_yolo is not None else []))
   sm = SubMaster(["deviceState", "carState", "roadCameraState", "liveCalibration", "driverMonitoringState", "carControl",
-                  "liveDelay", "carrotMan", "radarState", "selfdriveState"])
+                  "liveDelay", "carrotMan", "radarState", "selfdriveState"], frequency=ModelConstants.MODEL_RUN_FREQ)
 
   publish_state = PublishState()
   params = Params()

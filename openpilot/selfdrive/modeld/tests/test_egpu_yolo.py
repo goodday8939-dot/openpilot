@@ -154,6 +154,7 @@ def test_resident_yolo_uses_primary_queue_only_after_all_driving_publications():
   assert len(driving) == 3
   assert len(optional) == 1 and optional[0] > max(driving)
   assert "ReuseRuntime.load(self.input_queues['img_q'])" in source
+  assert 'frequency=ModelConstants.MODEL_RUN_FREQ' in source
 
 
 def test_yuv_adapter_preserves_luma_parity_and_chroma():

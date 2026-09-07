@@ -44,7 +44,10 @@ class ReuseRuntime(YoloRuntime):
       raise ValueError('reuse artifact must retain native driving input resolution')
     # This is a compiled artifact replay on the driving owner's startup thread.
     # No ONNX runner or compiler is invoked on live camera frames.
-    return cls(input_queue, bundle)
+    runtime = cls(input_queue, bundle)
+    from openpilot.common.swaglog import cloudlog
+    cloudlog.info('resident YOLO prepared: %s, required %.3f ms', bundle['variant'], runtime.budget.estimate*1000+.001*1000)
+    return runtime
 
   def infer(self):
     from openpilot.selfdrive.modeld.egpu_yolo_usb import run_yolo, read_yolo
