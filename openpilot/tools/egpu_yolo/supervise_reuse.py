@@ -19,6 +19,7 @@ from openpilot.cereal import messaging
 from openpilot.common.params import Params
 from openpilot.selfdrive.modeld.egpu_yolo import camera_time
 from openpilot.tools.egpu_yolo.recovery import RecoveryPolicy
+from openpilot.tools.egpu_yolo.restart_affinity import prepare_restart_affinity
 from openpilot.selfdrive.modeld.egpu_yolo_reuse import observation_state_permitted
 
 
@@ -293,6 +294,10 @@ try:
   if args.attach_model_pid is not None:
     assert old_model == args.attach_model_pid, 'prepared owner PID changed'
   else:
+    # Do this only after the fresh stationary maintenance preflight, before any
+    # manager stop. Both an existing tmux server and a newly spawned server
+    # must launch ordinary processes on housekeeping CPUs, not isolated CPU 7.
+    report['restart_affinity'] = prepare_restart_affinity()
     manager_pid = int(next(line for line in Path(f'/proc/{old_model}/status').read_text().splitlines()
                            if line.startswith('PPid:')).split()[1])
     base_env = {**os.environ, **dict(item.split('=', 1) for item in Path(f'/proc/{manager_pid}/environ').read_text().split('\0') if '=' in item)}

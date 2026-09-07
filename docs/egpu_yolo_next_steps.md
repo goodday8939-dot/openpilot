@@ -35,6 +35,51 @@ in route logging; Web-only IDs/candidates can be reconstructed from the raw
 timestamped streams rather than being treated as a new control signal. Moving
 accuracy and radar-candidate identity remain unvalidated.
 
+### Restart scheduling incident and recovery (2026-09-07)
+
+The first road-mode preparation timed out without a prepared YOLO owner or any
+YOLO inference. The owner reported recurring lag and CPU7 saturation. Preserve
+the incident separately from the earlier successful stationary trials: road
+observation has not yet been established on the vehicle.
+
+Before another restart, live inspection found `isolcpus=6,7`, CPU7 at 100%,
+modeld about 60% and plannerd about 18%, plus ordinary micd, hardwared, proclogd
+and other daemons running on CPU7 despite permitting all eight CPUs. The tmux
+server also occupied CPU7. Its newly created pane can leave ordinary manager
+children on an isolated CPU, where automatic load balancing does not rescue
+them. The sampled microphone callback had accumulated about 199 seconds of
+run-queue wait. Available memory was about 1.4 GB and CPU temperature below
+54 C; no second driving GPU owner was found.
+
+At fresh Park/standstill/disabled state, 30 ordinary threads belonging to the
+manager and explicitly identified management/audio/logging daemons were moved
+to CPUs0-3, recording their original affinities. Modeld, camera and control
+processes were not moved or restarted. The owner confirmed recovery. CPU7 fell
+to about 80%, soundPressure returned to 10 Hz, and commIssueAvgFreq disappeared.
+CPU2 briefly saturated while proclogd caught up (73 messages in 20 seconds
+versus its nominal 0.5 Hz); a later sample was about 62%. Its cumulative lag
+counted down rather than representing a single multi-minute operation.
+
+A 10.22-second raw pre-change sample contained 205 model publications, no frame
+gaps/drops, and maximum model time 38.35 ms. The 20-second post-change sample
+contained 400 model publications and no internal frame ID gaps, with maximum
+model time 37.95 ms; its decaying drop metric reached 0.312%, so this recovery
+must not be reported as entirely drop-free. An earlier conflating observer's
+apparent 14.6 Hz reception was not the raw model publication rate.
+
+The experimental supervisor now constrains both itself and the verified tmux
+server to ordinary scheduling on CPUs0-3 before stopping a manager. This covers
+both existing-server pane creation and new-server startup. Unexpected server
+identity, scheduling policy or CPU availability fails before mutation. It does
+not alter primary process affinity or loosen runtime timing/admission guards.
+Four focused launcher tests pass. Live supervised restart with this correction
+and moving road observation remain pending. The absent UsbGpuActive flag is
+still unresolved; an open USB descriptor alone does not prove active inference
+backend, and the supervisor must not force that flag to bypass its checks.
+
+Detailed incident evidence and affinity backups remain device-local under
+`/data/egpu_yolo/lag-road-preparation`. Only this aggregate summary is committed.
+
 ### Stage 2 display prototype (2026-09-07)
 
 The Web backend now assigns session-scoped visual IDs using class-compatible,
