@@ -324,6 +324,41 @@ deadline cannot preempt a running GPU job when camera delivery arrives early.
 
 ## Preparation
 
+### Final internal-GPU publication trial
+
+The version-2 cooperative artifact completed 60 saved-frame runs at 68.73 ms
+p50 / 69.32 ms p95 / 69.51 ms p99 / 69.57 ms maximum, with nine batches.
+Its output was bit-exact with the unsliced artifact, including serialization
+and reload. Independent ONNX Runtime comparison retained the 0.00481 maximum
+box/score error and matching classes for the three relevant anchors.
+
+A subsequent 180-second stationary trial warmed this artifact in the same
+worker with cameras stopped, restored the normal manager, and invoked
+`qcom_yolod.main(prepared_bundle=bundle, commissioning=True)`. It published
+688 results during the enabled window at 3.85 Hz, with zero skipped frames
+and one car detection per publication. Full live execution measured 119.88 ms
+p50 / 138.74 ms p95 / 148.59 ms p99 / 184.71 ms maximum. Unlike the earlier
+logging-only trials, these results reached the real `carrotYolo` publisher
+and Carrot Web API.
+
+Driving execution p50 / p99 / maximum was 36.55 / 39.26 / 40.98 ms before,
+36.62 / 43.26 / 56.04 ms during, and 35.82 / 37.65 / 38.89 ms after.
+Reported frame drops were zero. Camera-EOF-to-model-event latency was
+80.83 / 94.46 / 104.67 ms before, 83.87 / 108.44 / 120.35 ms during,
+and 84.30 / 95.71 / 99.87 ms after. This shows a remaining tail-latency
+cost and does not validate use while driving.
+
+All 56 sampled live Web responses contained car detection coordinates;
+35 were fresh and 21 exceeded the existing 350 ms display expiry. Thus the
+current rate can leave gaps between visible boxes. Final visual inspection
+was blocked because Computer Use could not verify the browser URL; API
+delivery is verified, but final on-screen rendering is not claimed here.
+The supervised worker was stopped after the trial. Automatic activation
+remains off: there is no `qcom_enabled` marker, and a cold worker is rejected.
+The normal manager and camera processes were restored. A shared HCQ source
+change caused normal startup to rebuild existing model artifacts once;
+readiness must be checked after restart rather than inferred from its exit.
+
 On a workstation, use `openpilot/tools/egpu_yolo/export_model.py` with the
 official YOLOv8n `.pt`. The tool exports a static ONNX and checks three input
 outputs against CPU PyTorch. Publish verified `big_driving_supercombo.onnx` and `manifest.json`
