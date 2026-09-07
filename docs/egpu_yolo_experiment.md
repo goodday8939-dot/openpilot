@@ -35,7 +35,7 @@ preempt an in-flight GPU kernel. QCOM still serves the driving image warp and
 UI, and must take over driving inference if the eGPU fails. Therefore process
 separation is not a guarantee of timing isolation. Compilation and live A/B
 tests are required before creating the commissioning marker. A runtime above
-40 ms or an execution error writes `qcom_fault`, preventing manager restarts
+100 ms or an execution error writes `qcom_fault`, preventing manager restarts
 from repeatedly resubmitting failing optional work.
 
 `qcom_yolo_prepare.py` compiles from a saved NV12 frame while offroad, with
@@ -62,16 +62,16 @@ This is one-image numerical validation, not detection-accuracy validation.
 
 A separate profile measured median submission 1.34 ms, GPU wait 221.59 ms,
 readback 0.76 ms and NMS 0.59 ms. One captured graph contained 172 kernels
-spanning 220.53 ms. Individual preprocessing and convolution timings were not
-retained, so this profile does not establish how much NV12 conversion costs.
+spanning 220.53 ms. A subsequent isolated profile measured 52.15 ms median
+for the original Tensor gather/stack NV12 preprocessing alone.
 Input is already NV12, but the existing network still receives RGB after GPU
 preprocessing; it is not a network trained directly on YUV. These measurements
 describe this compiler path, not an upper bound on internal-GPU performance.
 
 A subsequent FP16 buffer compilation was interrupted after a reported camera
 frame-rate warning. Its maintenance log contains repeated camera request skips
-and encoder dequeue timeouts. No completed FP16 latency or correctness result
-exists, and the FP16 prototype is not part of the deployed runner. The exact
+and encoder dequeue timeouts. That interrupted trial produced no FP16 result;
+later saved-frame trials completed only after the cameras stopped. The exact
 CPU/GPU/driver contribution to the camera stalls was not isolated. Compilation
 with live cameras must not be repeated; the preparation tool now rejects it.
 
@@ -81,12 +81,65 @@ and the driving model, with no displayed alert or camera error event. The last
 model sample reported zero frame drops and 37.07 ms execution. This recovery
 sample does not validate running YOLO alongside driving.
 
-The compiled FP32 artifact is retained for offline investigation, but
-`qcom_enabled` remains absent and the historical shared-eGPU artifact is retired.
-The requested ceiling is now 40 ms per complete YOLO frame. The measured
-artifact fails that ceiling and must not be commissioned. The runtime limit
-stops subsequent work after a slow completion; it cannot cancel an in-flight
-kernel. Passing 40 ms alone would still require a camera/driving latency check.
+The owner subsequently made 40 ms an optimization target rather than a hard
+acceptance ceiling, authorized some numerical precision loss, and requested
+that 512 x 256 resolution be preserved. The worker's 100 ms overrun guard stops
+subsequent submissions; it cannot cancel an in-flight kernel. The commissioning
+marker remains absent pending a camera/driving latency comparison. Neither
+40 ms nor 100 ms establishes isolation from the driving camera pipeline.
+
+### Fixed-resolution optimization and quantization
+
+All following trials use the same saved 1344 x 760 NV12 frame, with cameras,
+driving inference and DM stopped. A separate supervisor checks fresh manager
+and device state every 0.5 seconds and terminates optional work if onroad or
+camera activity returns. No live-camera compilation is used. Timings cover
+resident input through preprocessing, inference, readback and NMS; they exclude
+the initial camera snapshot and tensor upload and are not live-camera timings.
+
+The adapter now reads NV12 pixels directly in one GPU kernel. Its standalone
+preprocessing median was 9.17 ms including dispatch/readback, versus 52.15 ms
+before; the kernel itself took about 4.2-4.6 ms. Independent full-frame NumPy
+conversion agreed within 4.49e-6. Each convolution result is materialized to
+avoid recomputing shared branches. Unit ONNX stride/dilation tuples are
+normalized to scalar 1 so tinygrad actually selects its Winograd convolution.
+These overrides belong only to this YOLO runner; global driving operators
+are unchanged.
+
+| Candidate, all 512 x 256 | Median ms | Maximum ms | Outcome |
+| --- | ---: | ---: | --- |
+| Original FP32 buffer, 60 runs | 223.67 | 246.67 | Reference |
+| Direct NV12 + materialized FP32 Conv, 30 runs | 145.21 | 148.74 | Numerically validated |
+| Same with real FP32 Winograd, 30 runs | 84.12 | 87.19 | Best validated default-backend candidate |
+| FP16 storage / FP32 Conv, 30 runs | 125.16 | 127.85 | Low-confidence box drift; slower |
+| Mesa IR3 FP16 image Conv, 30 runs | 88.34 | 92.05 | Slight detection drift; slower |
+| Static INT8 Conv, 30 runs | 228.97 | 231.94 | Slower; not selected |
+
+The 84.12 ms candidate passed serialization/reload and comparison with the
+original ONNX Runtime FP32 network: maximum box/score error 0.00533, maximum
+box error 0.0000611 pixels among anchors above confidence 0.35, and matching
+classes. Workgroup variations gave roughly 82-85 ms with bit-exact outputs;
+that small difference is not treated as a robust additional speedup.
+
+INT8 was calibrated with 64 shuffled COCO128 images (seed 42), using ONNX
+Runtime 1.20.1 static QOperator quantization, unsigned activations, signed
+per-channel weights, MinMax calibration, and Conv-only quantization. All 64
+calibration samples were accumulated. The model shrank from 12,709,299 to
+3,382,556 bytes without changing input resolution. On the other 64 images,
+at confidence 0.35 and IoU 0.5, true detections changed from 153 to 152 of
+425 labels, false detections from 23 to 24, and detected people from 50 to 48
+of 89 labels. This small sanity set is not a driving-quality or full-COCO mAP
+evaluation. On the saved vehicle frame, INT8 lost the FP32 anchors above 0.35.
+The GPU INT8 implementation also differed from quantized ONNX Runtime outputs
+(maximum score difference 0.0485); it is not a numerically accepted candidate.
+
+This tinygrad QLinearConv path expands arithmetic to int32 and does not use a
+packed INT8 dot-product kernel. A direct compiler probe rejected
+`cl_qcom_dot_product8` and `qcom_dot8_acc`; this describes the available compiler,
+not a claim that all runtimes on this hardware lack INT8 acceleration. Merely
+changing the model dtype therefore does not promise a faster inference.
+The alternative IR3 compiler/library was confined to the experimental process
+and `/data/egpu_yolo/lib`; system drivers and modeld were not changed.
 
 ## Historical shared-eGPU execution and image coordinates
 

@@ -117,3 +117,32 @@ def test_compilation_rejects_onroad_and_driver_preview_even_without_live_process
   from openpilot.selfdrive.modeld.qcom_yolo_prepare import check_maintenance_state
   with pytest.raises(RuntimeError):
     check_maintenance_state([], onroad=onroad, driver_preview=preview)
+
+
+def test_runner_uses_winograd_for_unit_onnx_strides_without_changing_global_ops(monkeypatch):
+  from types import SimpleNamespace
+  from tinygrad import Tensor, dtypes
+  from tinygrad.helpers import Context
+  from tinygrad.nn.onnx import onnx_ops
+  from openpilot.selfdrive.modeld.qcom_yolo_model import make_runner
+
+  original_conv = onnx_ops['Conv']
+  original_winograd = Tensor._conv2d_winograd
+  calls = []
+
+  def observed_winograd(self, *args, **kwargs):
+    calls.append(self.shape)
+    return original_winograd(self, *args, **kwargs)
+
+  monkeypatch.setattr(Tensor, '_conv2d_winograd', observed_winograd)
+  runner = SimpleNamespace(graph_inputs={'images': SimpleNamespace(shape=(1, 3, 4, 4), dtype=dtypes.float32)}, onnx_ops=onnx_ops)
+  make_runner(runner, (4, 4, 4, 4, 2, 24), (4, 4))
+  rng = np.random.default_rng(8)
+  x = Tensor(rng.normal(size=(1, 8, 8, 8)).astype(np.float32))
+  w = Tensor(rng.normal(size=(8, 8, 3, 3)).astype(np.float32))
+  with Context(WINO=0):
+    expected = original_conv(x, w, strides=(1, 1), pads=(1, 1, 1, 1)).numpy()
+    actual = runner.onnx_ops['Conv'](x, w, strides=(1, 1), dilations=(1, 1), pads=(1, 1, 1, 1)).numpy()
+  np.testing.assert_allclose(actual, expected, atol=5e-5, rtol=1e-4)
+  assert calls == [(1, 8, 8, 8)]
+  assert onnx_ops['Conv'] is original_conv

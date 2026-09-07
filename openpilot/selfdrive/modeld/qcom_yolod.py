@@ -15,7 +15,9 @@ from openpilot.selfdrive.modeld.qcom_yolo_model import camera_transform
 DIRECTORY = Path('/data/egpu_yolo')
 INTERVAL = .25
 MAX_FRAME_AGE = .2
-MAX_RUNTIME = .04
+# 40 ms is the optimization target. A slower candidate still needs live A/B
+# commissioning; this limit only stops subsequent submissions after an overrun.
+MAX_RUNTIME = .1
 
 
 def permit_reason(*, onroad, egpu_active, loading, dm_disabled, dm_running, model_alive, manager_alive):

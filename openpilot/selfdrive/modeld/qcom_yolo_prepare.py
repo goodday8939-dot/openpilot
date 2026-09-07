@@ -23,7 +23,7 @@ def check_maintenance_state(processes, *, onroad, driver_preview):
 
 def compile_model(directory, input_nv12, camera_size, samples=60):
   os.environ.update(DEV='QCOM', WARP_DEV='QCOM', IMAGE='0', FLOAT16='1', NOLOCALS='1',
-                    JIT_BATCH_SIZE='0', OPENPILOT_HACKS='1')
+                    JIT_BATCH_SIZE='0', OPENPILOT_HACKS='1', QCOM_PRIORITY='15')
   from openpilot.cereal import messaging
   from openpilot.common.params import Params
   from openpilot.selfdrive.modeld.egpu_yolo import decode_detections
@@ -61,7 +61,10 @@ def compile_model(directory, input_nv12, camera_size, samples=60):
   tensor = Tensor(frame, device='QCOM').realize()
   for _ in range(3):
     raw = run(tensor).numpy()
-  os.sched_setaffinity(0, {4})
+  # Offroad power management can leave only CPUs 0-3 online. Preserve that
+  # affinity instead of failing after compilation by requesting offline CPU 4.
+  if 4 in os.sched_getaffinity(0):
+    os.sched_setaffinity(0, {4})
   os.nice(10)
   elapsed = []
   for _ in range(samples):
@@ -83,7 +86,10 @@ def compile_model(directory, input_nv12, camera_size, samples=60):
   np.testing.assert_allclose(restored['run'](tensor).numpy(), raw, rtol=1e-3, atol=1e-3)
   temporary.replace(target)
   report = {'model_id': manifest['model_id'], 'layout': layout, 'elapsed_seconds': elapsed,
-            'percentiles_ms': (np.percentile(elapsed, [50, 95, 99, 100]) * 1000).tolist(), 'serialization_passed': True}
+            'percentiles_ms': (np.percentile(elapsed, [50, 95, 99, 100]) * 1000).tolist(), 'serialization_passed': True,
+            'cpu_affinity': sorted(os.sched_getaffinity(0)), 'adapter_sha256': bundle['adapter_sha256'],
+            'onnx_sha256': bundle['onnx_sha256']}
+  np.savez_compressed(directory / 'qcom_compile_validation.npz', raw=raw)
   (directory / 'qcom_compile_report.json').write_text(json.dumps(report, indent=2) + '\n')
   print(json.dumps(report), flush=True)
 
