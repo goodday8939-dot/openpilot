@@ -5,6 +5,7 @@ window.CarrotTranslations.register("ko", {
   nativeName: "한국어",
   shortName: "KO",
   strings: {
+    egpu_yolo_recovering: "자동 재개 대기 · 정상 주기 확인 중",
     egpu_yolo_radar_corner_only: "레이더: 코너 신호만 수신",
     egpu_yolo_radar_no_front: "레이더: 전방 물체 없음",
     egpu_yolo_radar_candidate: "레이더: 연결 후보 · 미검증",

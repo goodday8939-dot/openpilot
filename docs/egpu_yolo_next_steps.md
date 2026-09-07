@@ -47,6 +47,38 @@ changing gear. Before treating candidates as matched identities, validate
 per-vehicle radar/camera alignment, object motion, false matches and ID switches
 against synchronized video and raw radar. Camera-only depth is not inferred.
 
+### Supervised automatic recovery and remaining CPU cost
+
+The owner requested automatic recovery after transient timing stops. The tracked
+`openpilot.tools.egpu_yolo.supervise_reuse` command retains the existing exclusive
+lock, expiring lease, single GPU owner, fresh Park/disabled conditions and raw
+camera/model timing guards. For a raw publication gap or primary execution/drop
+guard only, it first removes the enabled lease and saves the failed window, then
+requires 30/60/120 seconds of uninterrupted healthy disabled observation before
+retrying. At most three attempts are allowed per 15 minutes. Operator signals,
+changed Park/control/owner state, invalid streams, GPU errors, YOLO overruns and
+missing results do not auto-retry. Recovery neither restarts the manager nor
+recompiles. A manual session is limited to at most one hour and is not enabled
+at boot. Web status distinguishes the cooldown from active inference.
+
+The supervisor records the observed guard trigger and correlated camera/model
+statistics; it does not claim those observations identify the root cause.
+On the first Web-only restart at commit `40be30b941`, the old supervisor stopped
+after a 152.090 ms model publication gap, at 18,015 YOLO runs / zero YOLO overruns.
+The interrupted window reported nonzero driving drops (maximum 0.493%); primary
+and camera PIDs remained unchanged. Web startup is temporally associated, but
+causality has not been isolated. This longer display observation must not be
+described as zero driving drops. The earlier bounded A/B trials remain separate.
+
+CPU corner projection is now batched for two or more boxes. An alternating
+1,000-sample-per-variant CPU4 experiment (ordinary scheduling, nice 10, no GPU
+work) measured projection wall-time medians of 0.630 -> 0.335 ms for 10 boxes
+and 2.637 -> 0.865 ms for 40 boxes; corresponding thread CPU medians were
+0.631 -> 0.339 and 2.533 -> 0.859 ms. Zero/one-box frames retain the original
+projection path. This is a saved synthetic-box CPU microbenchmark, not a dense
+live-scene result or a reduction in neural-network GPU time. Tests compare the
+old/new projection across box counts, perspective transforms and invalid depths.
+
 The follow-up has completed the initial 640 x 384 saved-input eGPU measurement
 and independent numerical check. See [eGPU timing](egpu_yolo2_timing.md).
 Its 5,000 resident-input runs took 5.45 ms p50 / 6.24 ms p99 / 7.39 ms maximum,

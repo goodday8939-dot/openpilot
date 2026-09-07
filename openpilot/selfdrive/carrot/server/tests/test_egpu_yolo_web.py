@@ -1,4 +1,5 @@
 import importlib.util
+import json
 from pathlib import Path
 
 
@@ -32,3 +33,15 @@ def test_web_keeps_detection_timestamp_independent_of_diagnostic_heartbeat(tmp_p
   assert result["frame"]["frameId"] == 8
   assert result["status"]["frameId"] == 15
   assert result["ageSeconds"] > .5
+
+
+def test_web_exposes_only_fresh_supervisor_recovery_state(tmp_path):
+  feature = load_feature()
+  state = {'status': {}, 'frame': None, 'received': 0}
+  path = tmp_path / 'live_reuse_status.json'
+  path.write_text(json.dumps({'updated_camera_time': 100, 'stage': 'cooldown', 'retry_count': 1,
+                              'stable_seconds_required': 30, 'recovery_reason': 'modelV2 raw gap 152.090 ms'}))
+  assert feature.status_payload(state, tmp_path, 101)['supervisor']['stage'] == 'cooldown'
+  assert feature.status_payload(state, tmp_path, 111)['supervisor'] is None
+  path.write_text('{')
+  assert feature.status_payload(state, tmp_path, 101)['supervisor'] is None

@@ -81,11 +81,14 @@ export function installEgpuYoloOverlay(target = globalThis) {
   function draw(presented) {
     if (!visible() || presented?.source !== "live") { clear(); badge.style.display = "none"; return; }
     const state = lastPayload?.status || {};
-    const stopped = ["error", "overrun", "stopped", "dm_active", "egpu_wait", "offroad"].includes(state.state);
+    const recovering = lastPayload?.supervisor?.stage === "cooldown";
+    const stopped = recovering || lastPayload?.supervisor?.stage === "stopped"
+      || ["error", "overrun", "stopped", "dm_active", "egpu_wait", "offroad"].includes(state.state);
     const tr = (key, fallback) => target.getUIText?.(`egpu_yolo_${key}`, fallback) || fallback;
     badge.textContent = ["run", "no_budget", "camera_pending"].includes(state.state)
       ? `YOLO · ${((state.executionTime || 0) * 1000).toFixed(1)} ms · ${state.runs || 0}`
       : `YOLO · ${tr(state.state || "waiting", "Waiting")}`;
+    if (recovering) badge.textContent = `YOLO · ${tr("recovering", "Waiting for stable timing")}`;
     badge.style.display = lastPayload ? "block" : "none";
     const frame = stopped ? null : selectDetectionFrame(history, presented, target.performance.now());
     if (frame?.radarStatus) badge.textContent += ` · ${radarStatusLabel(frame.radarStatus, tr)}`;

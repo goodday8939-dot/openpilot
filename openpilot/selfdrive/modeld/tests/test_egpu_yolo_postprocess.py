@@ -3,7 +3,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from openpilot.selfdrive.modeld.egpu_yolo_postprocess import OutputWorker, decode_packet
+from openpilot.selfdrive.modeld.egpu_yolo_postprocess import OutputWorker, decode_packet, project_detections
 
 
 def test_full_cpu_output_socket_skips_without_waiting():
@@ -40,3 +40,21 @@ def test_cpu_decoder_rejects_wrong_compact_shape_and_preserves_paused_status():
     decode_packet(({}, np.zeros((1, 84, 2688)), np.eye(3), (1344, 760), [], 0.))
   metadata = {'frameId': 456, 'state': 'paused', 'detections': []}
   assert decode_packet((metadata, None, None, None, None, None)) == metadata
+
+
+@pytest.mark.parametrize('count', [0, 1, 2, 10, 40])
+@pytest.mark.parametrize('transform', [np.eye(3), np.array([[1.1, .2, 7], [-.03, .8, 19], [.01, -.01, 1]]),
+                                    np.array([[1, 0, 0], [0, 1, 0], [0, 0, -1]]), np.zeros((3, 3)), np.full((3, 3), np.nan)])
+def test_batch_projection_matches_original_for_dense_frames_and_invalid_depth(count, transform):
+  from openpilot.selfdrive.modeld.egpu_yolo import camera_detections
+  rng = np.random.default_rng(5)
+  detections = []
+  for index in range(count):
+    x, y = rng.uniform(-.1, 1.1, 2)
+    detections.append({'classId': index % 8, 'confidence': .8, 'x1': x, 'y1': y, 'x2': x+.2, 'y2': y+.3})
+  expected = camera_detections(detections, transform, (512, 256), (1344, 760))
+  actual = project_detections(detections, transform, (512, 256), (1344, 760))
+  assert len(actual) == len(expected)
+  for a, b in zip(actual, expected, strict=True):
+    np.testing.assert_allclose(a.pop('cameraPoints'), b.pop('cameraPoints'), rtol=0, atol=1e-14)
+    assert a == b

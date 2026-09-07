@@ -29,9 +29,30 @@ class OutputWorker:
       return False
 
 
+def project_detections(detections, transform, model_size, camera_size):
+  """Batch corner projection for crowded frames; retain the small-frame path."""
+  import numpy as np
+  from openpilot.selfdrive.modeld.egpu_yolo import camera_detections
+  if len(detections) < 2:
+    return camera_detections(detections, transform, model_size, camera_size)
+  if np.shape(transform) != (3, 3) or not np.isfinite(transform).all() or min(*model_size, *camera_size) <= 0:
+    return []
+  mw, mh = model_size
+  boxes = np.array([[d[k] for k in ('x1', 'y1', 'x2', 'y2')] for d in detections])
+  corners = np.ones((len(detections), 4, 3))
+  corners[:, :, 0] = boxes[:, [0, 2, 2, 0]]*mw
+  corners[:, :, 1] = boxes[:, [1, 1, 3, 3]]*mh
+  corners = corners @ transform.T
+  valid = np.isfinite(corners).all(axis=(1, 2)) & (corners[:, :, 2] > 1e-6).all(axis=1)
+  indices = np.flatnonzero(valid)
+  normalized = corners[indices, :, :2]/corners[indices, :, 2:]/np.asarray(camera_size)
+  return [{**detections[index], 'cameraPoints': points.flatten().tolist()} for index, points in zip(indices, normalized, strict=True)
+          if np.max(np.abs(points)) <= 10]
+
+
 def decode_packet(packet):
   import numpy as np
-  from openpilot.selfdrive.modeld.egpu_yolo import camera_detections, decode_detections, camera_time
+  from openpilot.selfdrive.modeld.egpu_yolo import decode_detections, camera_time
   metadata, values, transform, size, names, started = packet
   if values is None:
     return metadata
@@ -42,7 +63,7 @@ def decode_packet(packet):
   detections = decode_detections(values.astype(np.float32, copy=False), 512, 256, compact=True)
   for detection in detections:
     detection['label'] = names[detection['classId']]
-  metadata['detections'] = camera_detections(detections, np.asarray(transform), (512, 256), size)
+  metadata['detections'] = project_detections(detections, np.asarray(transform), (512, 256), size)
   metadata['postprocessTime'] = camera_time()-cpu_start
   metadata['executionTime'] = camera_time()-started
   return metadata

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 from pathlib import Path
 
 from aiohttp import web
@@ -67,8 +68,15 @@ def status_payload(state: dict, directory: Path, now: float) -> dict:
     status = {"state": "error"}
   elif not live and prepared and not (directory / 'qcom_enabled').exists():
     status = {"state": "prepared"}
+  supervisor = None
+  try:
+    report = json.loads((directory / 'live_reuse_status.json').read_text())
+    if 0 <= now-report.get('updated_camera_time', 0) < 10:
+      supervisor = {key: report.get(key) for key in ('stage', 'reason', 'recovery_reason', 'retry_count', 'stable_seconds_required')}
+  except (OSError, ValueError, TypeError, AttributeError):
+    pass
   return {"ok": True, "status": status, "frame": frame, "ageSeconds": age, "stale": age is None or age > .35,
-          "compiled": prepared, "downloaded": downloaded}
+          "compiled": prepared, "downloaded": downloaded, "supervisor": supervisor}
 
 
 async def api_status(request: web.Request):

@@ -5,6 +5,7 @@ window.CarrotTranslations.register("zh", {
   nativeName: "中文",
   shortName: "ZH",
   strings: {
+    egpu_yolo_recovering: "等待自动恢复 · 确认时序稳定",
     egpu_yolo_radar_corner_only: "雷达：仅角雷达信号",
     egpu_yolo_radar_no_front: "雷达：无前方目标",
     egpu_yolo_radar_candidate: "雷达：候选关联 · 未验证",
