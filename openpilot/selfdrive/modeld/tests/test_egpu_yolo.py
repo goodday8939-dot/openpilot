@@ -88,13 +88,6 @@ def test_budget_uses_complete_camera_pair_readiness():
     sof = 100 + frame * .05
     budget.observe(frame, sof, sof + .055)
   assert budget.admit(sof + .090) == "run"
-  tree = ast.parse((Path(__file__).parents[1] / "modeld.py").read_text())
-  extra_recv = max(node.lineno for node in ast.walk(tree) if isinstance(node, ast.Call)
-                   and isinstance(node.func, ast.Attribute) and node.func.attr == "recv"
-                   and isinstance(node.func.value, ast.Name) and node.func.value.id == "vipc_client_extra")
-  ready = next(node.lineno for node in ast.walk(tree) if isinstance(node, ast.Assign)
-               and any(isinstance(t, ast.Name) and t.id == "yolo_frame_received" for t in node.targets))
-  assert ready > extra_recv
 
 
 def test_overrun_disables_subsequent_gpu_submission():
@@ -150,15 +143,16 @@ def test_nms_empty_dense_and_nonfinite_outputs():
     decode_detections(raw, 320, 160)
 
 
-def test_source_fingerprint_and_driving_publication_order():
+def test_source_fingerprint_and_driving_loop_has_no_optional_gpu_execution():
   assert len(source_fingerprint()) == 64
   source = (Path(__file__).parents[1] / "modeld.py").read_text()
   tree = ast.parse(source)
   calls = [node for node in ast.walk(tree) if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)]
-  yolo = next(node.lineno for node in calls if node.func.attr == "after_publish")
+  assert not any(node.func.attr == "after_publish" for node in calls)
+  assert 'carrotYolo' not in source and 'YoloRuntime' not in source
   driving = [node.lineno for node in calls if node.func.attr == "send" and node.args
              and isinstance(node.args[0], ast.Constant) and node.args[0].value in ("modelV2", "drivingModelData", "cameraOdometry")]
-  assert len(driving) == 3 and max(driving) < yolo
+  assert len(driving) == 3
 
 
 def test_yuv_adapter_preserves_luma_parity_and_chroma():

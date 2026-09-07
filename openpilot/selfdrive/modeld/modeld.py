@@ -24,7 +24,6 @@ from openpilot.selfdrive.modeld.compile_modeld import make_input_queues, WARP_IN
 from openpilot.selfdrive.modeld.fill_model_msg import fill_model_msg, fill_driving_model_data, fill_pose_msg, PublishState
 from openpilot.common.file_chunker import open_file_chunked
 from openpilot.selfdrive.modeld.constants import ModelConstants, Plan
-from openpilot.selfdrive.modeld.egpu_yolo import CameraPrefetch, YoloRuntime, camera_time
 from openpilot.selfdrive.modeld.helpers import (get_tg_input_devices, load_oob, modeld_pkl_path,
                                                 refresh_usbgpu_device_cache, select_vision_streams, usbgpu_compiled_path,
                                                 usbgpu_pcie_not_ready, usbgpu_present, wait_for_usbgpu_present)
@@ -151,12 +150,6 @@ class ModelState:
     self.frame_buf_params = {k: get_nv12_info(cam_w, cam_h) for k in ('img', 'big_img')}
     self.run_policy = jits['run_policy']
     self.warp = jits[(cam_w,cam_h)]
-    self.yolo = None
-    if usbgpu:
-      try:
-        self.yolo = YoloRuntime.load(self.input_queues['img_q'])
-      except Exception:
-        cloudlog.exception("optional eGPU YOLO unavailable; continuing driving model")
 
   def slice_outputs(self, model_outputs: np.ndarray, output_slices: dict[str, slice]) -> dict[str, np.ndarray]:
     parsed_model_outputs = {k: model_outputs[np.newaxis, v] for k,v in output_slices.items()}
@@ -337,7 +330,7 @@ def main(demo=False):
   cloudlog.warning(f"models loaded in {time.monotonic() - st:.1f}s, modeld starting")
 
   # messaging
-  pm = PubMaster(["modelV2", "drivingModelData", "cameraOdometry", "carrotYolo"])
+  pm = PubMaster(["modelV2", "drivingModelData", "cameraOdometry"])
   sm = SubMaster(["deviceState", "carState", "roadCameraState", "liveCalibration", "driverMonitoringState", "carControl", "liveDelay", "carrotMan", "radarState"])
 
   publish_state = PublishState()
@@ -355,7 +348,6 @@ def main(demo=False):
   buf_main, buf_extra = None, None
   meta_main = FrameMeta()
   meta_extra = FrameMeta()
-  main_frames = CameraPrefetch(vipc_client_main, FrameMeta)
 
 
   if demo:
@@ -396,7 +388,8 @@ def main(demo=False):
 
     # Keep receiving frames until we are at least 1 frame ahead of previous extra frame
     while meta_main.timestamp_sof < meta_extra.timestamp_sof + 25000000:
-      buf_main, meta_main = main_frames.recv()
+      buf_main = vipc_client_main.recv()
+      meta_main = FrameMeta(vipc_client_main)
       if buf_main is None:
         break
 
@@ -424,10 +417,6 @@ def main(demo=False):
       # Use single camera
       buf_extra = buf_main
       meta_extra = meta_main
-
-    # Driving inference needs both synchronized cameras. Track readiness of
-    # the complete input pair, including the wait for the extra camera.
-    yolo_frame_received = camera_time()
 
     sm.update(0)
     desire = DH.desire
@@ -482,7 +471,6 @@ def main(demo=False):
       'action_t': np.array([lat_action_t, long_action_t], dtype=np.float32),
     }
 
-    inference_started = camera_time()
     mt1 = time.perf_counter()
     try:
       model_output = model.run(bufs, transforms, inputs, prepare_only)
@@ -502,7 +490,6 @@ def main(demo=False):
       # misleading communication/CAN error while selfdrived waits for modeld.
       model_output = model.run(bufs, transforms, inputs, prepare_only)
     mt2 = time.perf_counter()
-    inference_ended = camera_time()
     model_execution_time = mt2 - mt1
 
     if model_output is not None:
@@ -562,18 +549,6 @@ def main(demo=False):
         params.put_bool("UsbGpuLoading", False)
         usbgpu_startup_pending = False
         cloudlog.warning("eGPU first model output published; startup complete")
-      # Both consumers use the same GPU-resident YUV frame. Admission happens
-      # only AFTER every driving result is published, with no queued YOLO work.
-      if model.yolo is not None:
-        try:
-          model.yolo.after_publish(pm, meta_main.frame_id, meta_main.timestamp_sof, meta_main.timestamp_eof,
-                                   yolo_frame_received, camera_time(), prepare_only,
-                                   "wideRoad" if main_wide_camera else "road", model_transform_main,
-                                   (vipc_client_main.width, vipc_client_main.height), main_frames.ready,
-                                   inference_started, inference_ended)
-        except Exception:
-          cloudlog.exception("disabling optional eGPU YOLO after execution error")
-          model.yolo = None
     last_vipc_frame_id = meta_main.frame_id
 
 

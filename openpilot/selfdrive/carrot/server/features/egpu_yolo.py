@@ -43,9 +43,13 @@ def status_payload(state: dict, directory: Path, now: float) -> dict:
   frame = state["frame"]
   age = max(0, now - frame["timestampEof"] / 1e9) if frame else None
   live = now - state["received"] < 2
-  prepared = (directory / "yolo.pkl").is_file()
+  prepared = (directory / "yolo_qcom.pkl").is_file()
   downloaded = (directory / "model.onnx").is_file() and (directory / "manifest.json").is_file()
   status = state["status"] if live else {"state": "ready" if prepared else "downloaded" if downloaded else "not_prepared"}
+  if not live and (directory / 'qcom_fault').exists():
+    status = {"state": "error"}
+  elif not live and prepared and not (directory / 'qcom_enabled').exists():
+    status = {"state": "prepared"}
   return {"ok": True, "status": status, "frame": frame, "ageSeconds": age, "stale": age is None or age > .35,
           "compiled": prepared, "downloaded": downloaded}
 

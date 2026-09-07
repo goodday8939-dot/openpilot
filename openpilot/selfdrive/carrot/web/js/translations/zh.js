@@ -5,6 +5,11 @@ window.CarrotTranslations.register("zh", {
   nativeName: "中文",
   shortName: "ZH",
   strings: {
+    egpu_yolo_prepared: "内部 GPU 已就绪 · 等待测试",
+    egpu_yolo_egpu_wait: "等待 eGPU 驾驶推理",
+    egpu_yolo_dm_active: "驾驶员监控运行中 · 等待",
+    egpu_yolo_offroad: "等待启动",
+    egpu_yolo_stopped: "运行条件已改变 · 已停止",
     egpu_yolo_waiting: "等待中",
     egpu_yolo_not_prepared: "等待模型安装",
     egpu_yolo_downloaded: "已安装 · 等待编译",

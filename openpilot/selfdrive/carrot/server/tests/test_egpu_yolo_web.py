@@ -17,7 +17,9 @@ def test_web_payload_distinguishes_installed_and_compiled(tmp_path):
   (tmp_path / "model.onnx").touch()
   (tmp_path / "manifest.json").write_text("{}")
   assert feature.status_payload(state, tmp_path, 100)["status"]["state"] == "downloaded"
-  (tmp_path / "yolo.pkl").touch()
+  (tmp_path / "yolo_qcom.pkl").touch()
+  assert feature.status_payload(state, tmp_path, 100)["status"]["state"] == "prepared"
+  (tmp_path / "qcom_enabled").touch()
   assert feature.status_payload(state, tmp_path, 100)["status"]["state"] == "ready"
 
 

@@ -5,6 +5,11 @@ window.CarrotTranslations.register("ko", {
   nativeName: "한국어",
   shortName: "KO",
   strings: {
+    egpu_yolo_prepared: "내부 GPU 준비 완료 · 시험 대기",
+    egpu_yolo_egpu_wait: "eGPU 주행 추론 대기",
+    egpu_yolo_dm_active: "운전자 감시 실행 중 · 대기",
+    egpu_yolo_offroad: "시동 대기",
+    egpu_yolo_stopped: "실행 조건 해제 · 중지",
     egpu_yolo_waiting: "대기",
     egpu_yolo_not_prepared: "모델 설치 대기",
     egpu_yolo_downloaded: "설치 완료 · 컴파일 대기",

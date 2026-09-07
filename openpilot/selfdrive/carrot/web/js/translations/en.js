@@ -5,6 +5,11 @@ window.CarrotTranslations.register("en", {
   nativeName: "English",
   shortName: "EN",
   strings: {
+    egpu_yolo_prepared: "Internal GPU ready · awaiting trial",
+    egpu_yolo_egpu_wait: "Awaiting eGPU driving inference",
+    egpu_yolo_dm_active: "Driver monitoring active · waiting",
+    egpu_yolo_offroad: "Awaiting ignition",
+    egpu_yolo_stopped: "Execution conditions changed · stopped",
     egpu_yolo_waiting: "Waiting",
     egpu_yolo_not_prepared: "Awaiting model",
     egpu_yolo_downloaded: "Installed · awaiting compilation",

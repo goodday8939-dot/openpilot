@@ -5,7 +5,46 @@ at `90696ca69ae9a2325cb901cffb335ff45b95c0a7`. The Cinque Terre driving model an
 its NAS manifest are unchanged. This experiment is intentionally not enabled
 on the three maintained model variants.
 
-## Execution and image coordinates
+## Internal GPU worker (commissioning)
+
+The shared-eGPU execution path described below is retired. Its 3,732nd run
+took 24.887 ms with only 10.152 ms remaining, and latched `overrun`. The earlier
+short stationary measurements did not establish long-running isolation.
+`modeld` now has no YOLO inference call or `carrotYolo` publisher. The original
+USB helper modules remain available for reproducing the recorded experiment.
+
+`qcom_yolod` owns the observational publisher in a separate process. It uses
+the internal QCOM GPU, ordinary scheduling on CPU 4, and an interval of at
+least 250 ms. Its input is an owned copy of the latest road-camera NV12 frame,
+not the eGPU's driving input. GPU preprocessing letterboxes the full camera
+view into 512 x 256 RGB. For a 1344 x 760 camera the content is 453 x 256 with
+horizontal padding. The inverse letterbox transform maps boxes to the original
+camera. COCO classes, confidence 0.35, bounded NMS, and web expiry are unchanged.
+
+The manager gate requires onroad, `UsbGpuActive`, no `UsbGpuLoading`, existing
+`DisableDM` value 1 or 2, a compiled `yolo_qcom.pkl`, and an explicit local
+`/data/egpu_yolo/qcom_enabled` commissioning marker. The worker additionally
+requires fresh driving/manager/device messages and confirms both DM processes
+are stopped before submitting work. No DM setting is changed by YOLO.
+The test vehicle already had `DisableDM=2`, with both DM processes stopped.
+
+Mode changes revoke new submissions and suppress late results. They do not
+preempt an in-flight GPU kernel. QCOM still serves the driving image warp and
+UI, and must take over driving inference if the eGPU fails. Therefore process
+separation is not a guarantee of timing isolation. Compilation and live A/B
+tests are required before creating the commissioning marker. A runtime above
+100 ms or an execution error writes `qcom_fault`, preventing manager restarts
+from repeatedly resubmitting failing optional work.
+
+`qcom_yolo_prepare.py` compiles from a saved NV12 frame while driving, DM and
+YOLO processes are stopped. It verifies the existing ONNX checksum, tests
+serialization, and writes a separate QCOM artifact/report. It does not enable
+the worker. The NAS model and the eGPU driving artifacts are unchanged.
+QCOM needs branch-join materialization for YOLO: its compiler rejected a fused
+convolution/Concat kernel. This override is confined to the YOLO OnnxRunner;
+the global ONNX operator table and driving compiler are unchanged.
+
+## Historical shared-eGPU execution and image coordinates
 
 After all three driving publications, modeld may run YOLOv8n on the newest
 `img_q` frame, already resident on the same USB AMD device. Its packed YUV420

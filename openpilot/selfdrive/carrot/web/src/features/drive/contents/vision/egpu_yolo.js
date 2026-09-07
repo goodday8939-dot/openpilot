@@ -62,7 +62,7 @@ export function installEgpuYoloOverlay(target = globalThis) {
   function draw(presented) {
     if (!visible() || presented?.source !== "live") { clear(); badge.style.display = "none"; return; }
     const state = lastPayload?.status || {};
-    const stopped = ["error", "overrun"].includes(state.state);
+    const stopped = ["error", "overrun", "stopped", "dm_active", "egpu_wait", "offroad"].includes(state.state);
     const tr = (key, fallback) => target.getUIText?.(`egpu_yolo_${key}`, fallback) || fallback;
     badge.textContent = ["run", "no_budget", "camera_pending"].includes(state.state)
       ? `YOLO · ${((state.executionTime || 0) * 1000).toFixed(1)} ms · ${state.runs || 0}`
