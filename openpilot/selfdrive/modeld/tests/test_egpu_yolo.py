@@ -241,3 +241,22 @@ def test_native_runner_refuses_to_resize_an_existing_driving_image():
   runner = SimpleNamespace(graph_inputs={'images': SimpleNamespace(shape=(1, 3, 4, 8), dtype=dtypes.float32)})
   with pytest.raises(ValueError, match='cannot resize'):
     make_yolo_runner(runner, 8, 4, native=True)(Tensor.zeros(2, 6, 4, 8, dtype='uint8'))
+
+
+def test_native_jit_and_serialized_replay_follow_new_queue_and_changed_pixels():
+  import pickle
+  from tinygrad import Tensor, TinyJit
+  from openpilot.selfdrive.modeld.egpu_yolo_model import native_packed_yuv_to_rgb, packed_yuv_to_rgb
+  rng = np.random.default_rng(8)
+  frames = [rng.integers(0, 256, (3, 6, 4, 8), dtype=np.uint8) for _ in range(3)]
+  queues = [Tensor(frame).realize() for frame in frames]
+  run = TinyJit(native_packed_yuv_to_rgb, prune=True)
+  for queue in queues+queues:
+    expected = packed_yuv_to_rgb(queue[-1], (8, 16)).numpy()
+    np.testing.assert_allclose(run(queue).numpy(), expected, atol=1e-6)
+  restored = pickle.loads(pickle.dumps(run))
+  for queue in queues:
+    expected = packed_yuv_to_rgb(queue[-1], (8, 16)).numpy()
+    np.testing.assert_allclose(restored(queue).numpy(), expected, atol=1e-6)
+  queues[0].assign(queues[1]).realize()
+  np.testing.assert_allclose(restored(queues[0]).numpy(), packed_yuv_to_rgb(queues[1][-1], (8, 16)).numpy(), atol=1e-6)

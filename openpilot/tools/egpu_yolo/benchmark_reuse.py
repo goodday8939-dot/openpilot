@@ -74,6 +74,23 @@ def main():
     np.testing.assert_allclose(value['raw'][:, :4], reference[:, :4], atol=.5, rtol=.001)
     np.testing.assert_allclose(value['raw'][:, 4], reference[:, 4], atol=.001, rtol=0)
     np.testing.assert_array_equal(value['raw'][:, 5][relevant], reference[:, 5][relevant])
+  # A same-buffer/same-pixels serialization check cannot detect a graph that
+  # retained the compiler's image pointer. Check new allocations AND mutation
+  # of the original allocation against an uncaptured evaluation.
+  changed = host_queue.copy()
+  changed[:, :4] = 255-changed[:, :4]
+  other_queue = Tensor(changed, device=Device.DEFAULT).realize()
+  for value in variants.values():
+    expected = read_yolo(run_yolo(value['run'].fxn, other_queue))
+    assert not np.allclose(expected, value['raw'], rtol=1e-3, atol=1e-3), 'challenge image did not change the result'
+    np.testing.assert_allclose(read_yolo(run_yolo(value['run'], other_queue)), expected, rtol=1e-3, atol=1e-3)
+    queue.assign(other_queue).realize()
+    np.testing.assert_allclose(read_yolo(run_yolo(value['run'], queue)), expected, rtol=1e-3, atol=1e-3)
+    queue.assign(Tensor(host_queue, device=Device.DEFAULT)).realize()
+    np.testing.assert_allclose(read_yolo(run_yolo(value['run'], queue)), value['raw'], rtol=1e-3, atol=1e-3)
+    value['challenge_raw'] = expected
+    value['input_rebinding_passed'] = True
+  print('new allocation and in-place input changes passed', flush=True)
   config_realtime_process(7, 54)
   for index in range(args.samples):
     for value in variants.values():
@@ -92,7 +109,7 @@ def main():
             'cpu_affinity': sorted(os.sched_getaffinity(0)), 'device': Device.DEFAULT,
             'driving_weights_resident': True, 'input_upload_in_timing': False, 'variants': {}}
   for name, value in variants.items():
-    report['variants'][name] = {k: v for k, v in value.items() if k not in ('run', 'raw')}
+    report['variants'][name] = {k: v for k, v in value.items() if k not in ('run', 'raw', 'challenge_raw')}
     report['variants'][name]['phases_ms'] = {phase: stats([r[i] for r in value['samples']]) for i, phase in
                                             enumerate(('submit', 'readback_wait', 'nms', 'total'))}
     np.savez_compressed(out/f'{name}_validation.npz', raw=value['raw'])
@@ -107,15 +124,22 @@ def main():
             'names': manifest['names'], 'model_id': manifest['model_id'], 'onnx_sha256': manifest['sha256'],
             'device': Device.DEFAULT, 'source_fingerprint': source_fingerprint(),
             'measured_seconds': max(r[-1] for r in value['samples'])/1000,
-            'native': value['native'], 'output_dtype': value['output_dtype'], 'variant': selected}
+            'native': value['native'], 'output_dtype': value['output_dtype'], 'variant': selected,
+            'input_rebinding_passed': value['input_rebinding_passed']}
   target = out/'yolo_reuse.pkl'
-  with target.open('wb') as f:
+  temporary = target.with_suffix('.pkl.tmp')
+  with temporary.open('wb') as f:
     dump_oob(bundle, f)
-  with target.open('rb') as f:
+  with temporary.open('rb') as f:
     restored = load_oob(f)
   np.testing.assert_array_equal(read_yolo(run_yolo(restored['run'], queue)), value['raw'])
+  np.testing.assert_allclose(read_yolo(run_yolo(restored['run'], other_queue)), value['challenge_raw'], rtol=1e-3, atol=1e-3)
+  report['serialized_rebinding_passed'] = True
   report['serialization_passed'] = True
   report['device_error'] = repr(Device[Device.DEFAULT].error_state) if Device[Device.DEFAULT].error_state is not None else None
+  if report['device_error'] is not None:
+    raise RuntimeError(report['device_error'])
+  temporary.replace(target)
   (out/'reuse_report.json').write_text(json.dumps(report, indent=2)+'\n')
   print('selected', selected, report['variants'][selected]['phases_ms'], flush=True)
 

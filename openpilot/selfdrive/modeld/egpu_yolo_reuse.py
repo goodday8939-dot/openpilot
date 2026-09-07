@@ -40,6 +40,8 @@ class ReuseRuntime(YoloRuntime):
     from openpilot.selfdrive.modeld.helpers import load_oob
     with target.open('rb') as stream:
       bundle = load_oob(stream)
+    if bundle.get('input_rebinding_passed') is not True:
+      raise ValueError('reuse artifact must prove changing input allocation and pixels')
     if not bundle.get('native') or (bundle['width'], bundle['height']) != (input_queue.shape[-1]*2, input_queue.shape[-2]*2):
       raise ValueError('reuse artifact must retain native driving input resolution')
     # This is a compiled artifact replay on the driving owner's startup thread.
