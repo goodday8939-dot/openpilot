@@ -9,6 +9,7 @@ import math
 import hashlib
 import os
 import time
+from statistics import median
 from collections import deque
 from pathlib import Path
 
@@ -70,13 +71,18 @@ class IdleBudget:
     else:
       self.settled += 1
     self.offsets.append(received - sof)
-    self.deadline = min(received + FRAME_PERIOD, sof + min(self.offsets) + FRAME_PERIOD)
+    # Follow the typical camera delivery phase, without granting a fresh period
+    # after an unusually late receive. A single early delivery must not consume
+    # every later frame's idle slot for the whole six-second window.
+    self.deadline = min(received + FRAME_PERIOD, sof + median(self.offsets) + FRAME_PERIOD)
 
-  def admit(self, now: float) -> str:
+  def admit(self, now: float, camera_pending: bool = False) -> str:
     if self.disabled_reason:
       reason = self.disabled_reason
     elif self.settled < 20:
       reason = "warming"
+    elif camera_pending:
+      reason = "camera_pending"
     elif now - self.last_run < MIN_INTERVAL:
       return "rate_limit"
     elif now + self.estimate + GUARD > self.deadline:
@@ -93,6 +99,26 @@ class IdleBudget:
     if end + GUARD > self.deadline:
       self.overruns += 1
       self.disabled_reason = "overrun"
+
+
+class CameraPrefetch:
+  """Probe the actual next camera frame without losing it to optional work."""
+  def __init__(self, client, metadata):
+    self.client, self.metadata = client, metadata
+    self.pending = None
+
+  def recv(self):
+    if self.pending is not None:
+      value, self.pending = self.pending, None
+      return value
+    return self.client.recv(), self.metadata(self.client)
+
+  def ready(self) -> bool:
+    if self.pending is None:
+      buf = self.client.recv(timeout_ms=0)
+      if buf is not None:
+        self.pending = (buf, self.metadata(self.client))
+    return self.pending is not None
 
 
 def decode_detections(raw: np.ndarray, width: int, height: int, confidence: float = 0.35, *, compact: bool = False) -> list[dict]:
@@ -197,11 +223,13 @@ class YoloRuntime:
     return detections
 
   def after_publish(self, pm, frame_id: int, sof_ns: int, eof_ns: int, received: float,
-                    driving_published: float, dropped: bool, camera: str, transform: np.ndarray, camera_size: tuple[int, int]):
+                    driving_published: float, dropped: bool, camera: str, transform: np.ndarray, camera_size: tuple[int, int],
+                    next_frame_ready, inference_started: float, inference_ended: float):
     from openpilot.cereal import messaging
     self.budget.observe(frame_id, sof_ns / 1e9, received, dropped)
+    pending = next_frame_ready()
     start = camera_time()
-    reason = self.budget.admit(start)
+    reason = self.budget.admit(start, pending)
     detections = []
     if reason == "run":
       try:
@@ -221,6 +249,9 @@ class YoloRuntime:
       "modelId": self.model_id, "camera": camera, "state": reason,
       "executionTime": self.last_execution, "budgetTime": max(0, self.budget.deadline - start),
       "drivingPublishTime": int(driving_published * 1e9), "drivingLatency": max(0, driving_published - eof_ns / 1e9),
+      "inputReadyTime": int(received * 1e9), "inferenceStartTime": int(inference_started * 1e9),
+      "inferenceEndTime": int(inference_ended * 1e9), "deadlineTime": int(max(0, self.budget.deadline) * 1e9),
+      "requiredTime": self.budget.estimate + GUARD,
       "runs": self.budget.runs + int(reason == "run"), "skipped": self.budget.skipped, "overruns": self.budget.overruns,
       "cameraWidth": camera_size[0], "cameraHeight": camera_size[1], "detections": detections,
     }

@@ -13,7 +13,7 @@ from urllib.request import urlopen
 
 from openpilot.selfdrive.modeld.egpu_yolo import ARTIFACT_VERSION, GUARD, artifact_path, decode_detections, source_fingerprint
 
-MANIFEST_URL = "https://upload.shind0.synology.me/models/carrot-egpu-yolo/manifest.json"
+MANIFEST_URL = "https://upload.shind0.synology.me/models/carrot-egpu-yolo-512x256/manifest.json"
 REMOTE_FILENAME = "big_driving_supercombo.onnx"  # NAS model endpoint's supported filename; this directory contains only YOLO.
 
 

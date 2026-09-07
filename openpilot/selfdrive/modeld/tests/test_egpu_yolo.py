@@ -4,7 +4,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from openpilot.selfdrive.modeld.egpu_yolo import IdleBudget, camera_detections, decode_detections, source_fingerprint
+from openpilot.selfdrive.modeld.egpu_yolo import CameraPrefetch, IdleBudget, camera_detections, decode_detections, source_fingerprint
 
 
 def settled_budget(runtime=0.006):
@@ -30,6 +30,56 @@ def test_late_camera_receive_does_not_create_false_free_time():
   budget.observe(25, 101.25, 101.297)
   assert budget.deadline == pytest.approx(101.31)
   assert budget.admit(101.300) == "no_budget"
+
+
+def test_isolated_early_camera_does_not_remove_idle_slots_from_later_frames():
+  budget = IdleBudget(.006)
+  for frame in range(25):
+    sof = 100 + frame * .05
+    budget.observe(frame, sof, sof + (.04 if frame == 2 else .06))
+  assert budget.deadline == pytest.approx(sof + .11)
+  assert budget.admit(sof + .095) == "run"
+  # A delayed receive still cannot shift the deadline by that delay.
+  budget.observe(25, 101.25, 101.34)
+  assert budget.deadline == pytest.approx(101.36)
+
+
+def test_waiting_primary_frame_takes_priority_without_consuming_yolo_rate_slot():
+  budget = settled_budget()
+  start = budget.deadline - .03
+  assert budget.admit(start, camera_pending=True) == "camera_pending"
+  assert budget.runs == 0 and budget.skipped == 1
+  assert budget.admit(start, camera_pending=False) == "run"
+
+
+def test_camera_probe_preserves_frame_and_metadata_for_primary_inference():
+  class Client:
+    frame = 0
+    calls = []
+
+    def recv(self, timeout_ms=100):
+      self.calls.append(timeout_ms)
+      self.frame += 1
+      return f"frame{self.frame}"
+
+  client = Client()
+  prefetch = CameraPrefetch(client, lambda c: c.frame)
+  assert prefetch.ready() and prefetch.ready()
+  assert client.calls == [0]
+  assert prefetch.recv() == ("frame1", 1)
+  assert client.calls == [0]
+  assert prefetch.recv() == ("frame2", 2)
+  assert client.calls == [0, 100]
+
+
+def test_empty_camera_probe_does_not_cache_a_missing_frame():
+  class Client:
+    def recv(self, timeout_ms=100):
+      return None if timeout_ms == 0 else "next"
+
+  prefetch = CameraPrefetch(Client(), lambda c: "metadata")
+  assert not prefetch.ready()
+  assert prefetch.recv() == ("next", "metadata")
 
 
 def test_budget_uses_complete_camera_pair_readiness():

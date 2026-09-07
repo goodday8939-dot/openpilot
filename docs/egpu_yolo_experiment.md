@@ -11,7 +11,9 @@ After all three driving publications, modeld may run YOLOv8n on the newest
 `img_q` frame, already resident on the same USB AMD device. Its packed YUV420
 input is four luma parity planes plus U and V. The adapter reconstructs luma,
 upsamples chroma and uses the camera renderer's full-range conversion matrix,
-then bilinearly resizes to 320 x 160 RGB on the GPU. The original 80 COCO classes
+and keeps the native 512 x 256 driving YUV frame size for RGB inference on the GPU.
+This preserves 2.56 times the pixels of the initial 320 x 160 detector; the
+existing full-resolution web camera stream is unchanged. The original 80 COCO classes
 are preserved (a traffic-light class does not classify its signal color).
 
 There is no second image transfer or preview stream. The GPU reduces output to
@@ -32,10 +34,16 @@ use frame IDs when available, otherwise a bounded latest-result fallback.
 
 Twenty consecutive camera frames establish cadence. The next arrival deadline
 and web result expiry use the camera's CLOCK_BOOTTIME domain, including suspend.
-The deadline uses the earliest observed SOF-to-complete-input-pair offset over
+The deadline uses the median observed SOF-to-complete-input-pair offset over
 120 frames (after waiting for the synchronized extra camera), capped by
 receive time plus 50 ms. A late receive does not grant another free 50 ms.
 Frame gaps, timestamp jumps, and dropped frames restart settling.
+An isolated early delivery therefore does not remove later frames' idle slots.
+Before admission, a nonblocking probe checks the actual main-camera queue. If
+another frame is waiting, YOLO is skipped and the frame plus its metadata are
+preserved for the next driving iteration. The prediction remains best effort:
+camera delivery jitter can still make a future frame arrive earlier than the
+predicted deadline, so primary latency must be measured alongside YOLO timing.
 
 YOLO runs at most five times per second. Admission reserves 1.4 times the
 largest measured full execution time plus a 2 ms guard. A completion exceeding
@@ -57,13 +65,25 @@ random YUV inputs produced exactly equal outputs before and after optimization.
 These are isolated execution measurements, not a validated live detection rate.
 The original conservative live scheduler admitted zero runs in a 40-second
 sample. Live admission, primary latency and overlay checks remain necessary.
+With USB optimization at 320x160, a later 40-second live sample admitted four
+runs (5.31 ms p50 / 5.44 ms max), produced five detections and had no frame
+drops or estimated-deadline overruns. Primary inference measured 35.90 ms p50 /
+37.94 ms p99. A separate timestamp comparison measured about 2.63 ms from
+inference completion to all driving publications; that is outside the reported
+modelExecutionTime. The earliest-arrival scheduler often reported zero budget
+despite a nominal 11 ms remainder before input-preparation overhead. An independent
+camera subscriber measured a 56.43 ms median SOF-to-pair-ready offset, with a
+41.72 ms minimum, motivating the median phase plus actual pending-frame check.
+These 320x160 measurements do not validate the enlarged detector or new admission
+policy. The result service now includes input-ready, inference-start/end,
+publication/deadline timestamps and required time to distinguish each phase.
 
 ## Preparation
 
 On a workstation, use `openpilot/tools/egpu_yolo/export_model.py` with the
 official YOLOv8n `.pt`. The tool exports a static ONNX and checks three input
 outputs against CPU PyTorch. Publish verified `big_driving_supercombo.onnx` and `manifest.json`
-under `\\DS1821P\openpilot\models\carrot-egpu-yolo`.
+under `\\DS1821P\openpilot\models\carrot-egpu-yolo-512x256`.
 The NAS endpoint only serves its established ONNX filename. In this separate
 directory that file contains YOLO, and is installed as `/data/egpu_yolo/model.onnx`.
 

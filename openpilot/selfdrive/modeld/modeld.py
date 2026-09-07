@@ -24,7 +24,7 @@ from openpilot.selfdrive.modeld.compile_modeld import make_input_queues, WARP_IN
 from openpilot.selfdrive.modeld.fill_model_msg import fill_model_msg, fill_driving_model_data, fill_pose_msg, PublishState
 from openpilot.common.file_chunker import open_file_chunked
 from openpilot.selfdrive.modeld.constants import ModelConstants, Plan
-from openpilot.selfdrive.modeld.egpu_yolo import YoloRuntime, camera_time
+from openpilot.selfdrive.modeld.egpu_yolo import CameraPrefetch, YoloRuntime, camera_time
 from openpilot.selfdrive.modeld.helpers import (get_tg_input_devices, load_oob, modeld_pkl_path,
                                                 refresh_usbgpu_device_cache, select_vision_streams, usbgpu_compiled_path,
                                                 usbgpu_pcie_not_ready, usbgpu_present, wait_for_usbgpu_present)
@@ -355,6 +355,7 @@ def main(demo=False):
   buf_main, buf_extra = None, None
   meta_main = FrameMeta()
   meta_extra = FrameMeta()
+  main_frames = CameraPrefetch(vipc_client_main, FrameMeta)
 
 
   if demo:
@@ -395,8 +396,7 @@ def main(demo=False):
 
     # Keep receiving frames until we are at least 1 frame ahead of previous extra frame
     while meta_main.timestamp_sof < meta_extra.timestamp_sof + 25000000:
-      buf_main = vipc_client_main.recv()
-      meta_main = FrameMeta(vipc_client_main)
+      buf_main, meta_main = main_frames.recv()
       if buf_main is None:
         break
 
@@ -482,6 +482,7 @@ def main(demo=False):
       'action_t': np.array([lat_action_t, long_action_t], dtype=np.float32),
     }
 
+    inference_started = camera_time()
     mt1 = time.perf_counter()
     try:
       model_output = model.run(bufs, transforms, inputs, prepare_only)
@@ -501,6 +502,7 @@ def main(demo=False):
       # misleading communication/CAN error while selfdrived waits for modeld.
       model_output = model.run(bufs, transforms, inputs, prepare_only)
     mt2 = time.perf_counter()
+    inference_ended = camera_time()
     model_execution_time = mt2 - mt1
 
     if model_output is not None:
@@ -567,7 +569,8 @@ def main(demo=False):
           model.yolo.after_publish(pm, meta_main.frame_id, meta_main.timestamp_sof, meta_main.timestamp_eof,
                                    yolo_frame_received, camera_time(), prepare_only,
                                    "wideRoad" if main_wide_camera else "road", model_transform_main,
-                                   (vipc_client_main.width, vipc_client_main.height))
+                                   (vipc_client_main.width, vipc_client_main.height), main_frames.ready,
+                                   inference_started, inference_ended)
         except Exception:
           cloudlog.exception("disabling optional eGPU YOLO after execution error")
           model.yolo = None

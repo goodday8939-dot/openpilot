@@ -236,6 +236,11 @@ struct CarrotYolo @0xda96579883444c35 {
   cameraWidth @13 :UInt16;
   cameraHeight @14 :UInt16;
   detections @15 :List(Detection);
+  inputReadyTime @16 :UInt64;
+  inferenceStartTime @17 :UInt64;
+  inferenceEndTime @18 :UInt64;
+  deadlineTime @19 :UInt64;
+  requiredTime @20 :Float32;
   struct Detection {
     classId @0 :UInt16;
     label @1 :Text;
