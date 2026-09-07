@@ -35,9 +35,50 @@ new maintenance. Its PID file is `/data/egpu_yolo/qcom_display_coordinator.pid`;
 verify the process command before signaling it. Automatic `qcom_enabled`
 activation remains absent, and cold `qcom_yolod` launches are rejected.
 
+Continuous-display retries at 4 Hz and 2 Hz stopped after 175 and 94 runs
+respectively on a sampled model-publication gap above 120 ms. A subsequent
+30-second baseline received all 600 publications with a 77.57 ms maximum gap.
+The observer now checks a non-conflating model subscription, preserving the
+120 ms limit, to distinguish actual publication gaps from missed intermediate
+messages in a sampled view. The original outlier cause is not established.
+The display retry uses a 500 ms interval without changing input resolution.
+
+### Bicycle miss: resolution evidence
+
+A saved current road frame visibly contains parked bicycles. In the actual
+512 x 256 input, the bicycle candidate occupies approximately 38 x 22 pixels.
+Independent ONNX Runtime inference on matching NV12 preprocessing produced a
+maximum bicycle score of 0.0276, below the 0.35 display threshold. A plant class
+won at that anchor; lowering the display threshold is not a reliable fix.
+
+The same YOLOv8n weights were also tested on the saved RGB image using standard
+Ultralytics CPU preprocessing. These are input dimensions, width x height:
+
+| Input | Best bicycle confidence |
+| --- | ---: |
+| 512 x 256 | 0.0215 |
+| 640 x 384 | 0.5764 |
+| 896 x 512 | 0.8532 |
+| 1344 x 768 | 0.8927 |
+| Manually selected bicycle-region crop, 384 x 256 | 0.8861 |
+
+The 640 x 384 result also contained a motorcycle classification at 0.4696
+over the same bicycles. This is one-scene evidence, not a general accuracy
+benchmark. The crop was selected after looking at the image; it does not
+validate automatic region selection. CPU preprocessing differs slightly from
+the live NV12 kernel, explaining the different low-resolution scores. No
+higher-resolution model has been compiled or timed on the vehicle yet.
+The workstation now has a static 640 x 384 ONNX candidate (12,756,343 bytes),
+SHA-256 `e02d75ddde2a1792e0275af57e3c23dd8dc307aa64a6c2f86c8f1889618d7f76`.
+Its three random-input comparisons against PyTorch passed with maximum
+absolute errors below 0.00087. It remains a local candidate; the generated
+manifest's prospective NAS URL has not been published or installed.
+
 ## 1. Stabilize eGPU latency without shrinking resolution
 
-Retain 512 x 256 initially. The historical shared-eGPU path measured 5.27 ms
+Use 512 x 256 as the timing baseline, and evaluate 640 x 384 or a justified
+region strategy as an accuracy candidate given the bicycle miss. Do not reduce
+resolution further. The historical shared-eGPU path measured 5.27 ms
 median and 5.73 ms maximum in a short trial, but later overran at 24.887 ms.
 It is currently retired. Reproduce and separate GPU kernels, queue waits,
 USB readback, host scheduling, NMS and full camera-to-publication age. Its
