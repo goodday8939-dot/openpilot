@@ -9,6 +9,32 @@ validated or enabled by this plan.
 
 ## Current baseline
 
+### Explicit road-observation session (2026-09-07 follow-up)
+
+The owner requested viewing and logging YOLO while driving. The supervisor now
+accepts `--road-observation` with explicit stationary maintenance authorization.
+Preparation and the initial manager restart still require fresh Park,
+standstill and disabled controls. Road mode is fixed in the GPU owner's startup
+state and must match each fresh lease; editing a stationary lease cannot promote
+an existing stationary owner. Road mode cannot attach to an existing owner.
+
+After preparation, a known gear, finite speed, fresh vehicle/control/camera
+services and active ignition replace the stationary/disabled restriction.
+Engaged driving controls do not by themselves disable observational inference.
+The primary frame still must be timely and undropped; pending-camera admission,
+measured worst-time reservation, nonblocking CPU delivery, GPU-error/overrun
+latches, raw publication-gap supervision and bounded timing recovery remain.
+YOLO publishes observational results only. Sharing the GPU can still affect
+primary timing, so lack of a direct control consumer is not a no-impact claim.
+
+This is a manual current-ignition session, with a hard maximum of four hours;
+ignition off, an expired supervisor lease or a non-recoverable guard stops it.
+It does not activate again at boot. Web status labels this mode explicitly.
+`carrotYolo`, `liveTracks`, camera metadata and calibration already participate
+in route logging; Web-only IDs/candidates can be reconstructed from the raw
+timestamped streams rather than being treated as a new control signal. Moving
+accuracy and radar-candidate identity remain unvalidated.
+
 ### Stage 2 display prototype (2026-09-07)
 
 The Web backend now assigns session-scoped visual IDs using class-compatible,

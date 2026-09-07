@@ -25,7 +25,7 @@ from openpilot.selfdrive.modeld.fill_model_msg import fill_model_msg, fill_drivi
 from openpilot.common.file_chunker import open_file_chunked
 from openpilot.selfdrive.modeld.constants import ModelConstants, Plan
 from openpilot.selfdrive.modeld.egpu_yolo import CameraPrefetch, camera_time
-from openpilot.selfdrive.modeld.egpu_yolo_reuse import ReuseRuntime, stationary_permitted
+from openpilot.selfdrive.modeld.egpu_yolo_reuse import ReuseRuntime, frame_permitted
 from openpilot.selfdrive.modeld.helpers import (get_tg_input_devices, load_oob, modeld_pkl_path,
                                                 refresh_usbgpu_device_cache, select_vision_streams, usbgpu_compiled_path,
                                                 usbgpu_pcie_not_ready, usbgpu_present, wait_for_usbgpu_present)
@@ -565,9 +565,10 @@ def main(demo=False):
       # work reads that exact buffer only after all three primary publications.
       if model.reuse_yolo is not None:
         try:
-          permitted = stationary_permitted(
+          permitted = frame_permitted(
+            mode=model.reuse_yolo.mode,
             fresh=sm.all_checks(['carState', 'selfdriveState', 'carControl', 'deviceState']),
-            started=sm['deviceState'].started, parked=str(sm['carState'].gearShifter) == 'park',
+            started=sm['deviceState'].started, gear=str(sm['carState'].gearShifter),
             standstill=sm['carState'].standstill, speed=sm['carState'].vEgo,
             enabled=sm['selfdriveState'].enabled, lat_active=sm['carControl'].latActive,
             long_active=sm['carControl'].longActive, primary_seconds=model_execution_time, dropped=prepare_only)

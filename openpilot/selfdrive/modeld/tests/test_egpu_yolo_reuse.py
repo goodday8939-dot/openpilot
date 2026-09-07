@@ -1,6 +1,6 @@
 import pytest
 
-from openpilot.selfdrive.modeld.egpu_yolo_reuse import leased, read_session, stationary_permitted
+from openpilot.selfdrive.modeld.egpu_yolo_reuse import frame_permitted, leased, read_session, stationary_permitted
 
 
 @pytest.mark.parametrize('expires', [0, 100, 99, 106, float('inf'), float('nan'), '103', None])
@@ -26,6 +26,41 @@ def test_incomplete_or_corrupt_session_fails_closed(tmp_path, monkeypatch, conte
   assert not read_session()
   target.write_text(content)
   assert not read_session()
+
+
+def test_session_mode_is_explicit_validated_and_cannot_promote_stationary_owner(tmp_path, monkeypatch):
+  import json
+  from openpilot.selfdrive.modeld import egpu_yolo_reuse
+  path = tmp_path/'session.json'
+  monkeypatch.setattr(egpu_yolo_reuse, 'session_path', lambda: path)
+  monkeypatch.setattr(egpu_yolo_reuse, 'camera_time', lambda: 100)
+  session = {'expires': 103, 'prepared': True, 'enabled': True}
+  path.write_text(json.dumps(session))
+  assert read_session(mode='stationary') and not read_session(mode='road_observation')
+  session['mode'] = 'road_observation'
+  path.write_text(json.dumps(session))
+  assert read_session(mode='road_observation') and not read_session(mode='stationary')
+  session['mode'] = 'unexpected'
+  path.write_text(json.dumps(session))
+  assert not read_session()
+
+
+@pytest.mark.parametrize('gear', ['drive', 'reverse', 'neutral', 'sport', 'low', 'brake', 'eco', 'manumatic'])
+@pytest.mark.parametrize('enabled', [False, True])
+def test_only_explicit_observation_mode_allows_motion_and_engaged_controls(gear, enabled):
+  state = {'fresh': True, 'started': True, 'gear': gear, 'standstill': False, 'speed': 15., 'enabled': enabled,
+           'lat_active': enabled, 'long_active': enabled, 'primary_seconds': .035, 'dropped': False}
+  assert frame_permitted(mode='road_observation', **state)
+  assert not frame_permitted(mode='stationary', **state)
+  assert not frame_permitted(mode='invalid', **state)
+
+
+@pytest.mark.parametrize('override', [{'fresh': False}, {'started': False}, {'gear': 'unknown'}, {'speed': float('nan')},
+                                    {'primary_seconds': .06}, {'primary_seconds': float('nan')}, {'dropped': True}])
+def test_observation_mode_preserves_freshness_primary_timing_and_drop_guards(override):
+  state = {'fresh': True, 'started': True, 'gear': 'drive', 'standstill': False, 'speed': 15., 'enabled': True,
+           'lat_active': True, 'long_active': True, 'primary_seconds': .035, 'dropped': False}
+  assert not frame_permitted(mode='road_observation', **{**state, **override})
 
 
 @pytest.mark.parametrize('override', [

@@ -1,4 +1,4 @@
-"""Manually leased, stationary reuse of the driving owner's existing eGPU queue."""
+"""Manually leased observation using the driving owner's existing eGPU queue."""
 import json
 import math
 
@@ -12,15 +12,21 @@ def session_path():
 def leased(value, now, *, enabled=True):
   expiry = value.get('expires', 0)
   return (isinstance(expiry, (float, int)) and math.isfinite(expiry) and 0 < expiry-now <= 5
+          and value.get('mode', 'stationary') in ('stationary', 'road_observation')
           and value.get('prepared') is True and (not enabled or value.get('enabled') is True))
 
 
-def read_session(*, enabled=True):
+def read_session_details(*, enabled=True):
   try:
     value = json.loads(session_path().read_text())
-    return isinstance(value, dict) and leased(value, camera_time(), enabled=enabled)
+    return value if isinstance(value, dict) and leased(value, camera_time(), enabled=enabled) else None
   except (OSError, ValueError, TypeError):
-    return False
+    return None
+
+
+def read_session(*, enabled=True, mode=None):
+  value = read_session_details(enabled=enabled)
+  return value is not None and (mode is None or value.get('mode', 'stationary') == mode)
 
 
 def stationary_permitted(*, fresh, started, parked, standstill, speed, enabled, lat_active, long_active,
@@ -30,12 +36,29 @@ def stationary_permitted(*, fresh, started, parked, standstill, speed, enabled, 
           and math.isfinite(primary_seconds) and 0 < primary_seconds < .06 and not dropped)
 
 
+def observation_state_permitted(*, fresh, started, gear, speed):
+  # This gate authorizes optional compute only, never an actuator command.
+  return (fresh and started and gear in ('park', 'drive', 'neutral', 'reverse', 'sport', 'low', 'brake', 'eco', 'manumatic')
+          and math.isfinite(speed))
+
+
+def observation_permitted(*, primary_seconds, dropped, **state):
+  return (observation_state_permitted(**state) and math.isfinite(primary_seconds) and 0 < primary_seconds < .06 and not dropped)
+
+
+def frame_permitted(*, mode='stationary', gear, **state):
+  if mode == 'road_observation':
+    return observation_permitted(gear=gear, **{k: state[k] for k in ('fresh', 'started', 'speed', 'primary_seconds', 'dropped')})
+  return mode == 'stationary' and stationary_permitted(parked=gear == 'park', **state)
+
+
 class ReuseRuntime(YoloRuntime):
   @classmethod
   def load(cls, input_queue):
     directory = artifact_path().parent
     target = directory / 'egpu2-reuse/yolo_reuse.pkl'
-    if not read_session(enabled=False) or not target.is_file() or (directory/'qcom_enabled').exists():
+    session = read_session_details(enabled=False)
+    if session is None or not target.is_file() or (directory/'qcom_enabled').exists():
       return None
     from openpilot.selfdrive.modeld.helpers import load_oob
     with target.open('rb') as stream:
@@ -49,6 +72,8 @@ class ReuseRuntime(YoloRuntime):
     # This is a compiled artifact replay on the driving owner's startup thread.
     # No ONNX runner or compiler is invoked on live camera frames.
     runtime = cls(input_queue, bundle)
+    # Lock mode at startup; changing a lease cannot promote a stationary owner.
+    runtime.mode = session.get('mode', 'stationary')
     from openpilot.selfdrive.modeld.egpu_yolo_postprocess import OutputWorker
     runtime.output = OutputWorker()
     from openpilot.common.swaglog import cloudlog
@@ -68,9 +93,10 @@ class ReuseRuntime(YoloRuntime):
   def after_publish(self, pm, frame_id, sof_ns, eof_ns, received, driving_published, dropped, camera,
                     transform, camera_size, next_frame_ready, inference_started, inference_ended, *, permitted):
     self.budget.observe(frame_id, sof_ns/1e9, received, dropped)
-    if not permitted or not read_session(enabled=False):
+    mode = getattr(self, 'mode', 'stationary')
+    if not permitted or not read_session(enabled=False, mode=mode):
       return
-    enabled = read_session()
+    enabled = read_session(mode=mode)
     pending = next_frame_ready() if enabled else False
     start = camera_time()
     # Consider every completed primary frame. The camera/deadline/overrun

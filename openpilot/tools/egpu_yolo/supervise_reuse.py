@@ -19,6 +19,7 @@ from openpilot.cereal import messaging
 from openpilot.common.params import Params
 from openpilot.selfdrive.modeld.egpu_yolo import camera_time
 from openpilot.tools.egpu_yolo.recovery import RecoveryPolicy
+from openpilot.selfdrive.modeld.egpu_yolo_reuse import observation_state_permitted
 
 
 def wall_time():
@@ -31,8 +32,11 @@ parser.add_argument('--stationary-maintenance', action='store_true')
 parser.add_argument('--dongle-id', required=True)
 parser.add_argument('--attach-model-pid', type=int)
 parser.add_argument('--max-session-seconds', type=int, default=3600)
+parser.add_argument('--road-observation', action='store_true', help='allow motion after stationary preparation; no control output')
 args = parser.parse_args()
-assert args.stationary_maintenance and 240 <= args.max_session_seconds <= 3600
+assert args.stationary_maintenance and 240 <= args.max_session_seconds <= (14400 if args.road_observation else 3600)
+assert not args.road_observation or args.attach_model_pid is None, 'road mode requires preparation of a new owner while parked'
+mode = 'road_observation' if args.road_observation else 'stationary'
 session_deadline = camera_time()+args.max_session_seconds
 recovery_policy = RecoveryPolicy()
 
@@ -50,7 +54,7 @@ required = ['carState', 'selfdriveState', 'carControl', 'deviceState', 'managerS
 sm = messaging.SubMaster(required+['onroadEvents', 'carrotYolo'])
 streams = ['modelV2', 'roadCameraState', 'wideRoadCameraState', 'driverCameraState', 'carrotYolo']
 sockets = {s: messaging.sub_sock(s, conflate=False) for s in streams}
-report = {'stage': 'preflight', 'phases': {}, 'coordinator_pid': os.getpid(), 'updated_unix': wall_time()}
+report = {'stage': 'preflight', 'phases': {}, 'coordinator_pid': os.getpid(), 'updated_unix': wall_time(), 'mode': mode}
 restarting = False
 restart = None
 base_env = None
@@ -72,10 +76,15 @@ def parked():
           and cs.standstill and abs(cs.vEgo) < .01 and str(cs.gearShifter) == 'park')
 
 
-def permitted():
+def permitted(*, maintenance=False):
   events = {str(e.name) for e in sm['onroadEvents']}
-  return (parked() and sm.all_checks(required) and not sm['selfdriveState'].enabled
-          and not sm['carControl'].latActive and not sm['carControl'].longActive
+  if args.road_observation and not maintenance:
+    state_allowed = observation_state_permitted(fresh=sm.all_checks(required), started=sm['deviceState'].started,
+                                               gear=str(sm['carState'].gearShifter), speed=sm['carState'].vEgo)
+  else:
+    state_allowed = (parked() and not sm['selfdriveState'].enabled
+                     and not sm['carControl'].latActive and not sm['carControl'].longActive)
+  return (state_allowed and sm.all_checks(required)
           and params.get_bool('UsbGpuActive') and not params.get_bool('UsbGpuLoading')
           and not (out/'qcom_enabled').exists()
           and not events.intersection({'cameraMalfunction', 'cameraFrameRate', 'processNotRunning'})
@@ -89,7 +98,7 @@ def lease(enabled):
   if now-last_lease < .25:
     return
   temp = lease_file.with_suffix('.tmp')
-  temp.write_text(json.dumps({'expires': now+3, 'prepared': True, 'enabled': enabled, 'pid': os.getpid()}))
+  temp.write_text(json.dumps({'expires': now+3, 'prepared': True, 'enabled': enabled, 'pid': os.getpid(), 'mode': mode}))
   temp.replace(lease_file)
   last_lease = now
 
@@ -162,7 +171,8 @@ def phase(name, seconds, enabled):
       if now >= session_deadline:
         raise RuntimeError('authorized session time expired')
       if not permitted():
-        raise RuntimeError(f'{name}: fresh Park/disabled/eGPU/camera guard changed')
+        guard = 'observation/eGPU/camera' if args.road_observation else 'Park/disabled/eGPU/camera'
+        raise RuntimeError(f'{name}: fresh {guard} guard changed')
       current_pid = next((p.pid for p in sm['managerState'].processes if p.name == 'modeld' and p.running), None)
       if current_pid != model_pid:
         raise RuntimeError('driving model process changed')
@@ -275,9 +285,9 @@ try:
   deadline = time.monotonic()+20
   while time.monotonic() < deadline:
     sm.update(100)
-    if permitted():
+    if permitted(maintenance=True):
       break
-  assert permitted(), 'fresh Park/disabled/eGPU state required'
+  assert permitted(maintenance=True), 'fresh Park/disabled/eGPU state required for preparation'
   original = {p.name: p.pid for p in sm['managerState'].processes if p.running}
   old_model = original['modeld']
   if args.attach_model_pid is not None:
@@ -319,9 +329,9 @@ try:
                                'usb_active': params.get_bool('UsbGpuActive'), 'yolo_state': str(sm['carrotYolo'].state)}
       save()
       last_preparation_report = camera_time()
-    if permitted() and sm.updated['carrotYolo'] and sm['carrotYolo'].state == 'paused':
+    if permitted(maintenance=True) and sm.updated['carrotYolo'] and sm['carrotYolo'].state == 'paused':
       break
-  assert permitted() and sm['carrotYolo'].state == 'paused', 'prepared driving owner not observed'
+  assert permitted(maintenance=True) and sm['carrotYolo'].state == 'paused', 'prepared driving owner not observed'
   restarting = False
   model_pid = next(p.pid for p in sm['managerState'].processes if p.name == 'modeld' and p.running)
   report.update(model_pid=model_pid, head=subprocess.check_output(['git', '-C', str(root), 'rev-parse', 'HEAD'], text=True).strip())

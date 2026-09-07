@@ -5,6 +5,7 @@ window.CarrotTranslations.register("en", {
   nativeName: "English",
   shortName: "EN",
   strings: {
+    egpu_yolo_observation: "Road observation",
     egpu_yolo_recovering: "Auto-resume pending · checking stable timing",
     egpu_yolo_radar_corner_only: "Radar: corner only",
     egpu_yolo_radar_no_front: "Radar: no front objects",

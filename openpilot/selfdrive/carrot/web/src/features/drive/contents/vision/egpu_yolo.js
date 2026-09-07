@@ -89,6 +89,7 @@ export function installEgpuYoloOverlay(target = globalThis) {
       ? `YOLO · ${((state.executionTime || 0) * 1000).toFixed(1)} ms · ${state.runs || 0}`
       : `YOLO · ${tr(state.state || "waiting", "Waiting")}`;
     if (recovering) badge.textContent = `YOLO · ${tr("recovering", "Waiting for stable timing")}`;
+    else if (lastPayload?.supervisor?.mode === "road_observation") badge.textContent += ` · ${tr("observation", "Observation")}`;
     badge.style.display = lastPayload ? "block" : "none";
     const frame = stopped ? null : selectDetectionFrame(history, presented, target.performance.now());
     if (frame?.radarStatus) badge.textContent += ` · ${radarStatusLabel(frame.radarStatus, tr)}`;
