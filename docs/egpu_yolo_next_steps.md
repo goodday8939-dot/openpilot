@@ -48,8 +48,15 @@ still cannot be admitted merely because recovery was requested.
 startup ordering, stale-boot and wrong-owner leases, moving/engaged gates,
 continuous-health recovery, bounded repeated backoff without permanent exit,
 GPU-error quarantine, preserved budget and nonblocking CPU-worker replacement.
-Live deployment verification is recorded in the task handoff; these unit tests
-alone are not proof of moving-scene accuracy or every hardware fault outcome.
+Fifteen Web/tracking tests also pass. On-device offroad deployment confirmed
+the persistent activation file, manager-owned automatic supervisor and its
+CPUs0-3 affinity. A deliberately terminated test CPU decoder was replaced in
+2.51 seconds, survived initialization and held no GPU device descriptors; the
+offroad CPU4-offline fallback was exercised. Terminating the automatic supervisor
+also caused the same manager to replace it, without restarting a driving model
+or camera. The final state was automatic/offroad, awaiting ignition. Actual
+next-ignition inference and moving recovery are not yet live-validated; neither
+these checks nor unit tests prove moving-scene accuracy or every hardware fault.
 
 The previous evening's saved fault window had a 160.123 ms **model publication
 gap**, not a 160 ms inference. Frames 6225 to 6228 skipped two model frame IDs;
