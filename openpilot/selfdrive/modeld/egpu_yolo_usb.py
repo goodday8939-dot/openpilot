@@ -1,5 +1,6 @@
 """YOLO-only USB submission helpers, used by the single modeld GPU owner."""
-from functools import lru_cache
+from functools import cache, lru_cache
+import array
 
 import numpy as np
 
@@ -18,6 +19,31 @@ def custom_usb(device) -> bool:
   return callable(getattr(device, "is_usb", None)) and device.is_usb() and device.iface.pci_dev.usb.usb.is_custom
 
 
+def submit_bound_compute(queue, device):
+  """Write a bound graph's indirect packet in contiguous USB transfers."""
+  commands = queue.indirect_cmd
+  ring = device.compute_queue.ring
+  position = device.compute_queue.put_value
+  offset = position % len(ring)
+  first = min(len(commands), len(ring)-offset)
+  ring[offset:offset+first] = array.array('I', commands[:first])
+  if first < len(commands):
+    ring[:len(commands)-first] = array.array('I', commands[first:])
+  device.compute_queue.put_value = position+len(commands)
+  device.compute_queue.signal_doorbell(device)
+
+
+@cache
+def batched_compute_type(base):
+  class YoloComputeQueue(base):
+    def _submit(self, device):
+      if self.binded_device == device and device.xccs == 1 and custom_usb(device):
+        submit_bound_compute(self, device)
+      else:
+        super()._submit(device)
+  return YoloComputeQueue
+
+
 def run_yolo(run, queue):
   from tinygrad.device import Device
   device = Device[queue.device]
@@ -26,11 +52,14 @@ def run_yolo(run, queue):
   # Graph construction happens on the modeld owner thread. Always restore the
   # normal factory before the next driving call, including initialization errors.
   previous = device.graph
+  previous_compute = device.hw_compute_queue_t
   device.graph = serial_graph_type()
+  device.hw_compute_queue_t = batched_compute_type(previous_compute)
   try:
     return run(queue=queue)
   finally:
     device.graph = previous
+    device.hw_compute_queue_t = previous_compute
 
 
 def read_yolo(raw):
