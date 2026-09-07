@@ -17,6 +17,8 @@ def main():
   parser.add_argument('--directory', type=Path, required=True)
   parser.add_argument('--input-packed', type=Path, required=True)
   parser.add_argument('--samples', type=int, default=3000)
+  parser.add_argument('--profile-replays', type=int, default=0,
+                      help='profile additional replays after timing; never include them in latency samples')
   parser.add_argument('--variants', nargs='+', choices=('original_fp32', 'native_fp32', 'native_fp16'),
                       default=['original_fp32', 'native_fp32', 'native_fp16'])
   parser.add_argument('--stationary-maintenance', action='store_true')
@@ -113,6 +115,23 @@ def main():
     report['variants'][name]['phases_ms'] = {phase: stats([r[i] for r in value['samples']]) for i, phase in
                                             enumerate(('submit', 'readback_wait', 'nms', 'total'))}
     np.savez_compressed(out/f'{name}_validation.npz', raw=value['raw'])
+    if args.profile_replays:
+      import cProfile
+      import pstats
+      profiler = cProfile.Profile()
+      profiler.enable()
+      for _ in range(args.profile_replays):
+        read_yolo(run_yolo(value['run'], queue))
+      profiler.disable()
+      entries = pstats.Stats(profiler).stats
+      report['variants'][name]['replay_profile'] = {
+        'replays': args.profile_replays,
+        'functions': [{'file': Path(key[0]).name, 'line': key[1], 'function': key[2],
+                       'calls': data[1], 'self_ms': data[2]*1000, 'cumulative_ms': data[3]*1000}
+                      for key, data in sorted(entries.items(), key=lambda item: item[1][3], reverse=True)[:40]],
+        'input_copied_by_jit': queue.uop.base in value['run'].captured._written_uops,
+        'captured_calls': len(value['run'].captured.linear.src),
+      }
   # Admission reserves the measured worst cost; p99 alone can choose a variant
   # whose isolated stall makes it ineligible for the driving frame's idle slot.
   selected = min(variants, key=lambda name: (report['variants'][name]['phases_ms']['total']['max'],
