@@ -2,8 +2,9 @@
 
 Follow-up measurements now use the owner-requested `carrot-egpu-yolo2` branch,
 continuing this experiment at `1310ed43fe`. See
-[640 x 384 eGPU timing](egpu_yolo2_timing.md) for the saved full-camera benchmark,
-USB upload cost, numerical checks and remaining live-validation work.
+[eGPU timing and native-buffer reuse](egpu_yolo2_timing.md) for the saved
+full-camera comparison, USB upload cost, native driving-queue implementation,
+numerical checks and current validation status.
 
 `carrot-egpu-yolo` is a separate feature experiment based on `carrot-cinque-terre`
 at `90696ca69ae9a2325cb901cffb335ff45b95c0a7`. The Cinque Terre driving model and
@@ -15,8 +16,10 @@ on the three maintained model variants.
 The shared-eGPU execution path described below is retired. Its 3,732nd run
 took 24.887 ms with only 10.152 ms remaining, and latched `overrun`. The earlier
 short stationary measurements did not establish long-running isolation.
-`modeld` now has no YOLO inference call or `carrotYolo` publisher. The original
-USB helper modules remain available for reproducing the recorded experiment.
+At that retirement `modeld` had no YOLO inference call or `carrotYolo` publisher.
+The follow-up branch adds a separately prepared, manually leased native-buffer
+runtime; the automatic activation described in the historical sections below
+is not restored. The original USB helpers remain for reproducing the experiment.
 
 `qcom_yolod` owns the observational publisher in a separate process. It uses
 the internal QCOM GPU, ordinary scheduling on CPU 4, and an interval of at

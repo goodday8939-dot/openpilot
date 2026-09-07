@@ -23,10 +23,23 @@ The same-frame 512 x 256 comparison took 3.64 ms resident-input median and
 independent ONNX checks. Each has 5,000 resident runs and 300 uploads at 5 Hz;
 neither measures live driving concurrency or a controlled thermal A/B.
 
+The native-buffer follow-up now completes a stationary 30/180/30-second
+baseline/enabled/recovery comparison: 703 live results at 3.91 Hz, zero YOLO
+admission overruns and zero driving frame drops. Submission plus GPU completion
+and readback measured 4.84 ms p50 / 5.24 ms p99 / 5.59 ms maximum. CPU NMS and
+projection run in a separate ordinary-scheduling CPU worker; full result latency
+was 9.28 / 19.69 / 25.70 ms. It reads the existing 512 x 256 driving queue with no
+second camera upload. Changed-input/allocation/serialized-replay checks prevent
+reuse of the prototype's stale capture-time buffer. See the timing report for
+excluded attempts, primary comparisons, retained samples and validation limits.
+
 The last internal-GPU continuous-display attempt had already stopped before
 the follow-up: 421 results, then a 150.47 ms model-publication gap with frame-ID
 delta 3 on the non-conflating observer. Its root cause remains unisolated.
-There is currently no YOLO display worker or automatic activation marker.
+The QCOM display worker and its automatic activation marker remain absent.
+Native-buffer work now uses the same modeld USB GPU owner under a short manual
+session lease. Consult the latest timing report and device-local
+`/data/egpu_yolo/live_reuse_status.json` before assuming any session is active.
 
 See `egpu_yolo_experiment.md` for measurements and numerical checks.
 The internal-GPU artifact uses YOLOv8n COCO FP32 at 512 x 256, confidence
@@ -36,7 +49,7 @@ median at 3.85 Hz. Its 180-second trial published 688 results without reported
 driving frame drops, but increased driving tail latency. The existing 350 ms
 display expiry can leave gaps between boxes.
 
-The owner subsequently requested continuous stationary display instead of a
+In that earlier internal-GPU experiment the owner requested continuous stationary display instead of a
 three-minute trial. Device-local `qcom_display_coordinator.py` performs the
 same guarded camera-stop/prewarm/normal-restore sequence, keeps the warmed
 worker alive, and runs `qcom_display_observer.py`. This is a manual session,
@@ -49,10 +62,10 @@ than accumulating an unlimited in-memory trial report. Inspect
 `/data/egpu_yolo/qcom_display_status.json` and
 `/data/egpu_yolo/qcom_display_coordinator.log` before any new GPU work.
 
-Do not start a second worker or compile while cameras are live. The current
-warm worker holds a GPU artifact in memory. Stop its supervisor cleanly before
-new maintenance. Its PID file is `/data/egpu_yolo/qcom_display_coordinator.pid`;
-verify the process command before signaling it. Automatic `qcom_enabled`
+Do not start a second worker or compile while cameras are live. If an earlier
+warm worker is still active, stop its supervisor cleanly before new maintenance.
+Its PID file is `/data/egpu_yolo/qcom_display_coordinator.pid`; verify the process
+command before signaling it. Automatic `qcom_enabled`
 activation remains absent, and cold `qcom_yolod` launches are rejected.
 
 Continuous-display retries at 4 Hz and 2 Hz stopped after 175 and 94 runs
@@ -96,7 +109,7 @@ absolute errors below 0.00087. The verified file was copied into a separate
 vehicle benchmark directory. Its prospective NAS URL is still unpublished,
 and neither live runtime has been switched to the 640 x 384 artifact.
 
-## 1. Stabilize eGPU latency without shrinking resolution
+## 1. Minimize eGPU latency with the existing native buffer
 
 The latest instruction is to reuse the native 512 x 256 driving `img_q` and
 minimize execution time, even if bicycle detection fails. Do not add a second
@@ -105,14 +118,21 @@ reconstruction using current driving calibration scored the bicycle 0.841 in
 the driving warp, 0.024 in full-view 512 x 256 and 0.638 in full-view 640 x 384.
 The narrower driving field of view retains more object pixels in this scene;
 these are CPU/ONNX comparisons, not reads of the live eGPU queue. Reusing the
-queue needs current-buffer ownership, timing guards and its own sustained
-primary-latency comparison before reactivating the retired execution path.
+queue uses current-buffer ownership, timing guards and its own sustained
+primary-latency comparison in the new manually leased runtime.
+The initial stationary comparison is complete; longer sessions, USB fault cases
+and moving-scene accuracy are still separate validation work. Preserve the
+CPU-only postprocessing boundary and current-frame ownership when extending it.
 
 Use 512 x 256 as the timing baseline, and evaluate 640 x 384 or a justified
 region strategy as an accuracy candidate given the bicycle miss. Do not reduce
 resolution further. The historical shared-eGPU path measured 5.27 ms
 median and 5.73 ms maximum in a short trial, but later overran at 24.887 ms.
-It is currently retired. Reproduce and separate GPU kernels, queue waits,
+That automatic path remains retired. The new native color kernel and leased
+same-owner runtime are described in `egpu_yolo2_timing.md`. A realized input
+slice initially retained saved pixels in the HCQ graph; direct whole-queue
+binding and changed-image/allocation/serialized-replay checks are now required.
+Separate GPU kernels, queue waits,
 USB readback, host scheduling, NMS and full camera-to-publication age. Its
 already-resident driving-warp input differs from the internal GPU's full-camera
 letterbox; do not treat equal tensor dimensions as equal field of view.
