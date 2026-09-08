@@ -983,7 +983,7 @@
       "ctitle": "AutoSteering Suspend Angle(300)",
       "cdescr": "Auto steering pauses at large steering angles and resumes when it returns within 15.",
       "min": 45,
-      "max": 300,
+      "max": 360,
       "default": 300,
       "unit": 10
     },
@@ -2444,7 +2444,7 @@
       "ctitle": "最大角度帧数 (89)",
       "cdescr": "推荐 89",
       "min": 80,
-      "max": 100,
+      "max": 300,
       "default": 89,
       "unit": 1
     },
