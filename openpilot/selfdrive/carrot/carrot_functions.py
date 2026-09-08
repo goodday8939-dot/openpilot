@@ -10,8 +10,13 @@ from openpilot.common.filter_simple import MyMovingAverage
 from openpilot.selfdrive.carrot.t_follow import get_t_follow_mode_factor, get_t_follow_mode_max, ramp_t_follow
 from openpilot.selfdrive.carrot.traffic_stop import TrafficStopModelLeadMatcher, is_traffic_stop_entry_allowed
 from openpilot.selfdrive.controls.radar_constants import RADAR_TO_CAMERA
-from openpilot.selfdrive.controls.lib.longitudinal_preview import LEAD_ACCEL_DEADBAND, LEAD_ACCEL_CONFIGURED_TF_MIN
+from openpilot.selfdrive.controls.lib.longitudinal_preview import LEAD_ACCEL_DEADBAND, LEAD_ACCEL_TF1_FORCE_MIN
 from openpilot.selfdrive.selfdrived.events import Events
+
+# Above this speed (km/h), tightened low-speed t_follow targets (e.g. for
+# congested/stop-and-go driving) no longer apply on their own -- get_T_FOLLOW
+# floors the result at the TFollowGap4-based gap instead.
+HIGH_SPEED_TF_FLOOR_KPH = 50.0
 
 EventName = log.OnroadEvent.EventName
 LaneChangeState = log.LaneChangeState
@@ -213,8 +218,8 @@ class CarrotPlanner:
     factor = self.myHighModeFactor if self.myDrivingMode == DrivingMode.High else self.mySafeFactor
     return np.interp(v_ego, A_CRUISE_MAX_BP_CARROT, cruiseMaxVals) * factor
 
-  def _get_base_t_follow(self, personality, v_ego, use_speed_tf=True):
-    if use_speed_tf and self.enableSpeedTF < 0:
+  def _get_base_t_follow(self, personality, v_ego):
+    if self.enableSpeedTF < 0:
       TF_SPEED_BPS = {
         -1: [0, 30, 60, 90],
         -2: [0, 40, 80, 120],
@@ -306,25 +311,33 @@ class CarrotPlanner:
 
   def get_T_FOLLOW(self, personality=log.LongitudinalPersonality.standard, v_ego=0.0, a_ego=0.0,
                    lead_status=False, lead_accel=0.0):
-    force_configured_tf_target = (
+    force_tf1_target = (
       lead_status
       and np.isfinite(lead_accel)
       and lead_accel > LEAD_ACCEL_DEADBAND
-      and self.leadAccelResponse >= LEAD_ACCEL_CONFIGURED_TF_MIN
+      and personality == log.LongitudinalPersonality.aggressive
+      and self.leadAccelResponse >= LEAD_ACCEL_TF1_FORCE_MIN
     )
-    tf_base = self._get_base_t_follow(personality, v_ego, use_speed_tf=not force_configured_tf_target)
-    if force_configured_tf_target:
-      # Levels 4-5 keep the driver's selected gap target authoritative while a
+    if force_tf1_target:
+      # Levels 4-5 keep the driver's Gap 1 target authoritative only while a
       # tracked lead is positively accelerating and the gap is opening. A
       # neutral/decelerating lead returns to normal gap processing at once.
-      tf_mode_target = tf_base
+      tf_mode_target = float(self.tFollowGap1)
     else:
+      tf_base = self._get_base_t_follow(personality, v_ego)
       tf_target = self._apply_speed_t_follow_scale(tf_base, v_ego)
       # Keep the target, deceleration hold state and applied state in the same
       # mode-scaled domain. Applying the mode factor after the hold compounded
       # Safe's 1.2 factor every cycle while decelerating.
       tf_mode_target = float(tf_target * self.myTFollowFactor)
     tf_adjusted = self._apply_decel_hold_and_boost_t_follow(tf_mode_target, a_ego)
+    # HIGH_SPEED_TF_FLOOR_KPH: 정체구간에서 tf_base를 좁혀도 그건 저속 전용 설정이어야
+    # 함. 이 속도(km/h)를 넘으면 좁힌 값 대신 TFollowGap4(원래 "여유있는" 단계) 기준
+    # 간격으로 복귀시켜, 고속에서까지 좁은 차간거리가 그대로 유지되는 걸 방지한다.
+    v_kph = v_ego * CV.MS_TO_KPH
+    if v_kph > HIGH_SPEED_TF_FLOOR_KPH:
+      high_speed_floor = float(self.tFollowGap4) * self.myTFollowFactor
+      tf_adjusted = max(tf_adjusted, high_speed_floor)
     tf_final = self._clip_t_follow(tf_adjusted)
     self._tf_applied = float(tf_final)
     return self.apply_t_follow(tf_final)
@@ -364,9 +377,7 @@ class CarrotPlanner:
       t_follow = np.clip(t_follow, 0.3, 2.0)
 
     return self.apply_t_follow(t_follow, 0.0)
-
-
-  def apply_t_follow(self, t_follow, adjust_t_follow=0.0):
+    def apply_t_follow(self, t_follow, adjust_t_follow=0.0):
     # t_follow가 급격히 증가하면 목표거리도 급격히 증가하여 강한 감속을 유도할 수 있으므로
     # 증가 방향만 천천히 반영
     t_follow = ramp_t_follow(t_follow, self.t_follow_last, self._tf_decel_extra, DT_MDL)
@@ -648,7 +659,7 @@ class CarrotPlanner:
       self._stop_x_rl = stop_model_x_raw
 
     # self.debugLongText = (
-    #   f"XState({str(self.xState)})," +
+    #   f"XState({str(self.xState)}),"" +
     #   f"stop_x={stop_x:.1f}," +
     #   f"stopDist={self.actual_stop_distance:.1f}," +
     #   f"Traffic={str(self.trafficState)}"
