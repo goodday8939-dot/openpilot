@@ -28,6 +28,27 @@ transfers. The display does not infer distances, alter radar associations, or
 feed detections into vehicle control. Only carrot-egpu-yolo2 receives this work;
 no shared radar detection/lead code or NAS radar replay dependencies changed.
 
+Validation: 76 cluster display/live tests and 20 supervisor/automatic tests
+passed on Windows, with three native messaging cases skipped there. Native
+vehicle checks confirmed event frequency bursts are accepted while stale/invalid
+events and bad carState frequency remain rejected. An additional cluster
+performance suite had 34 passes and one existing fixture failure (its fake Params
+lacks get_bool, in unchanged cluster_autorun code). The edited cluster files have
+no new Ruff findings relative to HEAD; their 15 existing findings are unchanged.
+Hidden-window rendered run/paused previews were inspected in both status colors.
+
+Deployed after fresh Park/standstill/disabled checks and one normal manager
+restart. The actual live cluster source produced `YOLO 실행 10.1ms · #597` and
+`의자 2 (49%)`; the managed cluster process was running. The following 30-second
+sample had 352 YOLO run messages, runs 812 to 1163, median 8.82 ms, maximum
+15.34 ms, zero overruns and zero supervisor retries. All three cameras delivered
+600 valid messages and primary/camera gaps stayed below 120 ms. Modeld delivered
+598 valid results across a 600-frame ID span (two missing results), maximum
+execution 37.84 ms and peak drop metric 0.493%; one non-run YOLO status also
+occurred. Thus the repeated event-triggered recovery delays are addressed, but
+this sample does not establish elimination of every transient input-frame miss.
+The supervisor averaged 8.48% of one CPU core.
+
 The first onroad automatic-start check exposed a supervisor sampling bug:
 `SubMaster(frequency=20)` sets frequency-check expectations but does not pace
 `update(50)`. Independently arriving messages woke the supervisor hundreds of
