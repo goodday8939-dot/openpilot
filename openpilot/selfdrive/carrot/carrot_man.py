@@ -2169,6 +2169,12 @@ class CarrotMan:
     if "route" in obj:
       self._safe_dispatch_handler("route", self.handle_route, obj["route"])
       handled = True
+      # 웹당근 등 HTTP 경로(POST /api/navi/{tmap_version})로 들어오는 carrotCmd
+      # (예: LANECHANGE 좌/우 버튼)도 UDP(7706) 경로와 동일하게 처리한다.
+      # carrot_serv.update()가 carrotCmd/carrotArg/carrotIndex 파싱을 전담한다.
+    if "carrotCmd" in obj:
+      self._safe_dispatch_handler("carrotCmd", self.carrot_serv.update, obj)
+      handled = True
 
     if handled:
       self._write_navi_debug_param(obj, event_type, event_time_ms)
