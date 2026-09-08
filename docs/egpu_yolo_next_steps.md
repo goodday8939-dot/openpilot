@@ -11,6 +11,17 @@ validated or enabled by this plan.
 
 ### Persistent automatic start and recovery (2026-09-08)
 
+The first onroad automatic-start check exposed a supervisor sampling bug:
+`SubMaster(frequency=20)` sets frequency-check expectations but does not pace
+`update(50)`. Independently arriving messages woke the supervisor hundreds of
+times per second; healthy 100 Hz carState/selfdriveState/carControl streams then
+failed its configured 20 Hz upper bound, leaving prepared YOLO permanently paused.
+The supervisor now samples nonblocking on an explicit 50 ms schedule, without
+catch-up bursts after slow iterations. Non-conflated camera/model timing guards
+remain in place. Status includes the individual failed service checks. A live
+read-only 20 Hz probe passed every required check before deployment; on-device
+inference verification follows separately.
+
 The owner explicitly requested operation after every ignition cycle and recovery
 without pulling over. This supersedes the manual-session-only behavior below.
 On this separate experiment, `/data/egpu_yolo/auto_enabled.json` containing

@@ -1,5 +1,4 @@
 """Manager-owned CPU supervisor. Never restarts cameras, modeld, or the GPU."""
-import fcntl
 import json
 import math
 import os
@@ -9,7 +8,18 @@ import time
 from openpilot.selfdrive.modeld.egpu_yolo_auto import AutomaticRecovery, boot_id, configured, directory
 
 
+def poll_inputs(sm, next_poll):
+  # SubMaster's frequency config describes the caller's sampling rate; it does
+  # not throttle poll(). Fast carState/control messages otherwise wake this loop
+  # hundreds of times per second and fail the configured 20 Hz upper bound.
+  time.sleep(max(0., next_poll-time.monotonic()))
+  next_poll = time.monotonic()+.05
+  sm.update(0)
+  return next_poll
+
+
 def main():
+  import fcntl
   os.sched_setscheduler(0, os.SCHED_OTHER, os.sched_param(0))
   os.sched_setaffinity(0, {0, 1, 2, 3})
   from openpilot.cereal import messaging
@@ -39,6 +49,7 @@ def main():
   owner_since = last_result = 0.
   last_overruns = 0
   next_save = next_lease = 0.
+  next_poll = 0.
   was_enabled = False
 
   def stop(signum, frame):
@@ -48,7 +59,7 @@ def main():
   signal.signal(signal.SIGINT, stop)
   try:
     while configured():
-      sm.update(50)
+      next_poll = poll_inputs(sm, next_poll)
       now = camera_time()
       current_owner = next((p.pid for p in sm['managerState'].processes if p.name == 'modeld' and p.running), None)
       if current_owner != owner:
@@ -57,8 +68,10 @@ def main():
         last_result, last_overruns = now, 0
       started = sm.seen['deviceState'] and sm.alive['deviceState'] and sm['deviceState'].started
       reason = ''
+      health_failures = {s: [check for check in ('alive', 'valid', 'freq_ok') if not getattr(sm, check)[s]]
+                         for s in required if not sm.all_checks([s])}
       if not sm.all_checks(required):
-        reason = 'waiting for fresh vehicle/model/camera data'
+        reason = 'waiting for fresh vehicle/model/camera data: '+', '.join(health_failures)
       elif not observation_state_permitted(fresh=True, started=started, gear=str(sm['carState'].gearShifter), speed=sm['carState'].vEgo):
         reason = 'waiting for active ignition and valid vehicle state'
       elif not params.get_bool('UsbGpuActive') or params.get_bool('UsbGpuLoading'):
@@ -122,6 +135,7 @@ def main():
                   'mode': 'road_observation', 'automatic': True, 'coordinator_pid': os.getpid(), 'model_pid': owner,
                   'updated_camera_time': now, 'reason': policy.reason, 'recovery_reason': policy.reason,
                   'retry_count': policy.failures, 'stable_seconds_required': policy.delay, 'recovery_history': history,
+                  'health_failures': health_failures,
                   'latest': sm['carrotYolo'].to_dict() if sm.seen['carrotYolo'] else {}}
         temp = out/'live_reuse_status.tmp'
         temp.write_text(json.dumps(report))
