@@ -18,6 +18,12 @@ def poll_inputs(sm, next_poll):
   return next_poll
 
 
+def make_submaster(messaging, required):
+  # selfdrived publishes onroadEvents every second AND whenever events change.
+  # Its burst rate is not a health signal; retain alive/valid checks instead.
+  return messaging.SubMaster(required+['carrotYolo'], frequency=20, ignore_avg_freq=['onroadEvents'])
+
+
 def main():
   import fcntl
   os.sched_setscheduler(0, os.SCHED_OTHER, os.sched_param(0))
@@ -40,7 +46,7 @@ def main():
   lease_file = out/'reuse_session.json'
   required = ['carState', 'selfdriveState', 'carControl', 'deviceState', 'managerState', 'modelV2',
               'roadCameraState', 'wideRoadCameraState', 'driverCameraState', 'onroadEvents']
-  sm = messaging.SubMaster(required+['carrotYolo'], frequency=20)
+  sm = make_submaster(messaging, required)
   streams = ['modelV2', 'roadCameraState', 'wideRoadCameraState', 'driverCameraState']
   sockets = {name: messaging.sub_sock(name, conflate=False) for name in streams}
   params, policy = Params(), AutomaticRecovery()

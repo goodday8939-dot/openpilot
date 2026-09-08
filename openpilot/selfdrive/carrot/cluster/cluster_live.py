@@ -24,6 +24,7 @@ from cluster_navi import fresh_carrot_navi, parse_carrot_navi, resolve_navi_spee
 from cluster_navi_source import NaviIpcMediaSource
 from cluster_route_replay import RouteLogParser, finite_float, frame_to_state, safe_get, safe_optional_float
 from cluster_utils import clamp
+from cluster_yolo import build_yolo_display
 
 
 def find_openpilot_root(start: Path) -> Path | None:
@@ -78,6 +79,7 @@ def _limited_items(items: Any, max_items: int):
 
 
 LIVE_SERVICES_BASE = (
+    "carrotYolo",
     "carState",
     "carParams",
     "modelV2",
@@ -450,6 +452,7 @@ class OpenpilotLiveSource:
             onroad=onroad,
             alert=self._live_cluster_alert(state.alert, onroad),
             egpu_active=getattr(self, "_egpu_active", False),
+            yolo=self._yolo_display(now),
             external_nav_active=external_nav_active,
             vehicle_navi_available=vehicle_navi_available,
             speed_limit_kph=speed_limit_kph,
@@ -467,6 +470,18 @@ class OpenpilotLiveSource:
             cruise_override_label=cruise_override_label,
             cruise_override_color_mode=cruise_override_color_mode,
         )
+
+    def _yolo_display(self, now):
+        sm = getattr(self, "sm", None)
+        seen = getattr(sm, "seen", {}).get("carrotYolo", False)
+        message = self._service_data("carrotYolo") if seen else None
+        received = getattr(sm, "recv_time", {}).get("carrotYolo", -math.inf)
+        published = getattr(sm, "logMonoTime", {}).get("carrotYolo", 0)
+        eof = safe_get(message, "timestampEof", 0)
+        transport_age = now-received
+        return build_yolo_display(message, enabled=getattr(self, "_egpu_active", False),
+                                  valid=getattr(sm, "valid", {}).get("carrotYolo", False),
+                                  transport_age=transport_age, image_age=(published-eof)/1e9+transport_age)
 
     def _live_cluster_alert(self, current_alert: ClusterAlert | None, onroad: bool) -> ClusterAlert | None:
         now = time.monotonic()

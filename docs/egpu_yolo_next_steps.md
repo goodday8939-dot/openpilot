@@ -11,6 +11,23 @@ validated or enabled by this plan.
 
 ### Persistent automatic start and recovery (2026-09-08)
 
+On the next ignition, four unnecessary pauses were traced to onroadEvents
+frequency checks. selfdrived publishes that service every second **and on each
+event change**, so a burst above 1.2 Hz is valid. The supervisor now excludes only
+onroadEvents from average-frequency checks; its alive/valid checks and all other
+service, camera and inference guards remain mandatory. This prevents valid event
+changes from increasing the recovery backoff to 30 seconds.
+
+The yolo2 cluster now consumes the existing carrotYolo service for a compact
+status panel: run/wait/paused/error state, current inference milliseconds, run
+counter, and up to three object classes with counts and best confidence. Korean
+and English text follow the existing display language. Expired images (over
+350 ms), invalid results and paused/error messages clear the object summary;
+stopped publishers become stale. This adds neither inference nor camera USB
+transfers. The display does not infer distances, alter radar associations, or
+feed detections into vehicle control. Only carrot-egpu-yolo2 receives this work;
+no shared radar detection/lead code or NAS radar replay dependencies changed.
+
 The first onroad automatic-start check exposed a supervisor sampling bug:
 `SubMaster(frequency=20)` sets frequency-check expectations but does not pace
 `update(50)`. Independently arriving messages woke the supervisor hundreds of

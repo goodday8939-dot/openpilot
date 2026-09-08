@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 from cluster_config import DEFAULT_LANE_WIDTH_M, WHITE
+from cluster_yolo import YoloDisplay
 
 CruiseDisplayState = Literal["off", "paused", "engaged"]
 GitBranchStatusState = Literal["ok", "pull", "missing", "unknown"]
@@ -494,6 +495,7 @@ class ClusterUiState:
     network_address: str | None = None
     network_connected: bool = False
     egpu_active: bool = False
+    yolo: YoloDisplay | None = None
     external_nav_active: bool = False
     vehicle_navi_available: bool = False
     steering_output: float | None = None

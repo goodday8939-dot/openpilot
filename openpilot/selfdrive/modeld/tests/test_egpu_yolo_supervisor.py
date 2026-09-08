@@ -10,6 +10,33 @@ def frequency_tracker():
   return pytest.importorskip('openpilot.cereal.messaging').FrequencyTracker
 
 
+def test_event_change_bursts_do_not_disable_health_checks_for_other_services():
+  calls = []
+  required = ['onroadEvents', 'modelV2', 'carState']
+  supervisor.make_submaster(SimpleNamespace(SubMaster=lambda *args, **kwargs: calls.append((args, kwargs))), required)
+  assert calls == [((required+['carrotYolo'],), {'frequency': 20, 'ignore_avg_freq': ['onroadEvents']})]
+
+
+def test_bursty_onroad_events_keep_validity_and_liveness_checks():
+  messaging = pytest.importorskip('openpilot.cereal.messaging')
+  sm = object.__new__(messaging.SubMaster)
+  sm.services = ['onroadEvents', 'carState']
+  sm.ignore_average_freq = ['onroadEvents']
+  sm.ignore_alive = sm.ignore_valid = []
+  sm.alive = dict.fromkeys(sm.services, True)
+  sm.valid = dict.fromkeys(sm.services, True)
+  sm.freq_ok = {'onroadEvents': False, 'carState': True}
+  assert sm.all_checks()
+  sm.valid['onroadEvents'] = False
+  assert not sm.all_checks()
+  sm.valid['onroadEvents'] = True
+  sm.alive['onroadEvents'] = False
+  assert not sm.all_checks()
+  sm.alive['onroadEvents'] = True
+  sm.freq_ok['carState'] = False
+  assert not sm.all_checks()
+
+
 def test_fast_vehicle_messages_are_sampled_at_the_declared_rate(monkeypatch, frequency_tracker):
   now = [100.]
   monkeypatch.setattr(supervisor.time, 'monotonic', lambda: now[0])

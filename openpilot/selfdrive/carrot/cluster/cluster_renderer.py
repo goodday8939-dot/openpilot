@@ -13,6 +13,7 @@ from pathlib import Path
 
 import numpy as np
 import pyray as rl
+from cluster_yolo import yolo_text
 
 from openpilot.common.transformations.camera import DEVICE_CAMERAS, view_frame_from_device_frame
 from openpilot.common.transformations.orientation import rot_from_euler
@@ -4048,6 +4049,7 @@ class ClusterUiRenderer:
     ) -> None:
         profile_stage = self._profile_start()
         screen_mode = self._effective_screen_mode(state)
+        self._draw_yolo_status(state, screen_mode)
         offset_x = self._driving_hud_offset_design_x(screen_mode)
         if abs(offset_x) > 0.001:
             rl.rl_push_matrix()
@@ -4066,6 +4068,19 @@ class ClusterUiRenderer:
                 right_x=self._core_usage_right_x(screen_mode),
             )
             self._profile_add("hud.cluster_core_usage", profile_stage)
+
+    def _draw_yolo_status(self, state: ClusterUiState, screen_mode: int) -> None:
+        if state.yolo is None:
+            return
+        x = (DESIGN_WIDTH - 520.0 if screen_mode == CLUSTER_SCREEN_MODE_FULLSCREEN_3D
+             else self._driving_hud_offset_design_x(screen_mode) + 420.0)
+        color = (GREEN if state.yolo.state == "run" else RED if state.yolo.state in ("error", "overrun", "invalid") else AMBER)
+        rect = rl.Rectangle(x, 10.0, 500.0, 62.0)
+        rl.draw_rectangle_rounded(rect, 0.2, 8, rl_color((8, 13, 18), 205))
+        rl.draw_rectangle_rounded_lines_ex(rect, 0.2, 8, 1.0, rl_color(color))
+        title, content = yolo_text(state.yolo, self.language)
+        self._draw_text(self._ellipsize_text(title, 23, 476), x+12, 27, 23, color, anchor="left")
+        self._draw_text(self._ellipsize_text(content, 20, 476), x+12, 54, 20, WHITE, anchor="left")
 
     def _draw_route_replay_controls(
         self,
