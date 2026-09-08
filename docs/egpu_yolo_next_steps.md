@@ -19,8 +19,23 @@ failed its configured 20 Hz upper bound, leaving prepared YOLO permanently pause
 The supervisor now samples nonblocking on an explicit 50 ms schedule, without
 catch-up bursts after slow iterations. Non-conflated camera/model timing guards
 remain in place. Status includes the individual failed service checks. A live
-read-only 20 Hz probe passed every required check before deployment; on-device
-inference verification follows separately.
+read-only 20 Hz probe passed every required check before deployment. Local tests
+passed 19 cases (two native messaging cases skipped on Windows); equivalent
+healthy-100-Hz and rejected-5-Hz cases passed using the vehicle's actual
+FrequencyTracker without pytest. The manager preimports Python daemons, so
+restarting only its child still forked the old code. A normal manager restart
+was performed after fresh Park/standstill/disabled checks, using the existing
+restart helper and CPU0-3 inheritance fix; no standalone YOLO daemon was added.
+
+After normal startup, a 30-second live observation recorded 329 valid YOLO
+results, runs 97 to 425, median full pipeline 7.39 ms, maximum 13.98 ms and zero
+overruns. Modeld produced 601 valid results, maximum execution 37.43 ms and zero
+frame-drop metric. The three camera streams each produced 600 or 601 valid
+frames; none of the primary/camera publication gaps exceeded 120 ms. The new
+supervisor remained in display with no health failures or retries, averaging
+8.67% of one CPU core. This verifies actual automatic preparation/admission
+after a normal manager startup on ignition; moving recovery and another full
+power cycle remain separate checks.
 
 The owner explicitly requested operation after every ignition cycle and recovery
 without pulling over. This supersedes the manual-session-only behavior below.
