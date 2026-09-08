@@ -18,8 +18,12 @@ PREVIEW_RELEASE_STEP_S = 0.03
 LEAD_ACCEL_RESPONSE_MIN = 0
 LEAD_ACCEL_RESPONSE_MAX = 5
 LEAD_ACCEL_CRUISE_RESPONSE_MIN = 3
-LEAD_ACCEL_CONFIGURED_TF_MIN = 4
+LEAD_ACCEL_TF1_FORCE_MIN = 4
 LEAD_ACCEL_MIN_TRACK_FRAMES = 3
+# How much tighter than the target distance the gap is allowed to be while
+# still engaging the lead-accel response (covers the stop -> launch moment,
+# where gap_margin sits near/at 0 rather than positive).
+LAUNCH_GAP_MARGIN_TOLERANCE_M = 2.0
 CRUISE_SPEED_ERROR_DEADBAND = 1.0 / 3.6
 
 # Preview is an offset from the calibrated actuator action time. These bounds
@@ -150,7 +154,11 @@ def lead_accel_response_allowed(level: int, *, v_rel: float, gap_margin: float,
   positive_lead_accel = a_lead > LEAD_ACCEL_DEADBAND
   # Cost reduction is only for catching back up to the configured TF. Once
   # that distance is reached, normal MPC costs resume and maintain the gap.
-  if (gap_margin <= 0.0 or
+  # LAUNCH_GAP_MARGIN_TOLERANCE_M: allow engagement slightly before the gap
+  # actually exceeds the target so a departing lead at a stop (gap_margin
+  # near/at 0, since stop distance ~= target distance at v=0) is matched
+  # immediately instead of only after a gap has already opened.
+  if (gap_margin <= -LAUNCH_GAP_MARGIN_TOLERANCE_M or
       v_rel < tuning.closing_speed_floor or
       not positive_lead_accel or
       (response_level < LEAD_ACCEL_RESPONSE_MAX and not cruise_source_active and lead_accel_signal <= 0.0)):
