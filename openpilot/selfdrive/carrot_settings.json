@@ -2653,7 +2653,7 @@
       "cgroup": "跟车距离",
       "ctitle": "跟车时间(1): TimeFollow1x0.01s(110)",
       "cdescr": "跟车距离 1 级",
-      "min": 40,
+      "min": 10,
       "max": 300,
       "default": 110,
       "unit": 5
@@ -2669,7 +2669,7 @@
       "cgroup": "跟车距离",
       "ctitle": "跟车时间(2): TimeFollow2x0.01s(120)",
       "cdescr": "跟车距离 2 级",
-      "min": 40,
+      "min": 10,
       "max": 300,
       "default": 120,
       "unit": 5
@@ -2685,7 +2685,7 @@
       "cgroup": "跟车距离",
       "ctitle": "跟车时间(3): TimeFollow3x0.01s(140)",
       "cdescr": "跟车距离 3 级",
-      "min": 40,
+      "min": 10,
       "max": 300,
       "default": 140,
       "unit": 5
@@ -2701,7 +2701,7 @@
       "cgroup": "跟车距离",
       "ctitle": "跟车时间(4): TimeFollow4x0.01s(160)",
       "cdescr": "跟车距离 4 级",
-      "min": 40,
+      "min": 10,
       "max": 300,
       "default": 160,
       "unit": 5
