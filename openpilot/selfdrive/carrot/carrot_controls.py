@@ -14,9 +14,10 @@ class CarrotControls:
     resume_angle  = 15
     delay_sec     = 1.0
     hold_sec      = 0.5
+    speed_limit_kph = 35.0   # 이 속도(km/h) 이하에서만 손 조향 양보 기능 작동
 
     # 1) enter condition timer
-    enter_cond = CS.steeringPressed and abs(CS.steeringAngleDeg) > suspend_angle
+    enter_cond = CS.steeringPressed and abs(CS.steeringAngleDeg) > suspend_angle and CS.vEgo < (speed_limit_kph / 3.6)
     if not self.lat_suspend_active:
       if enter_cond:
         self.lat_suspend_enter_t += DT_CTRL
@@ -30,7 +31,7 @@ class CarrotControls:
     if self.lat_suspend_active:
       self.lat_suspend_hold_t += DT_CTRL
 
-      exit_cond = (abs(CS.steeringAngleDeg) < resume_angle) and (not CS.steeringPressed)
+      exit_cond = (abs(CS.steeringAngleDeg) < resume_angle) and (not CS.steeringPressed) or (CS.vEgo >= (speed_limit_kph / 3.6))
       if (self.lat_suspend_hold_t >= hold_sec) and exit_cond:
         self.lat_suspend_active = False
         self.lat_suspend_enter_t = 0.0
