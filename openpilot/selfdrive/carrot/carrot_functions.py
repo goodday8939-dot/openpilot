@@ -377,13 +377,13 @@ class CarrotPlanner:
       t_follow = np.clip(t_follow, 0.3, 2.0)
 
     return self.apply_t_follow(t_follow, 0.0)
-    def apply_t_follow(self, t_follow, adjust_t_follow=0.0):
-    # t_follow가 급격히 증가하면 목표거리도 급격히 증가하여 강한 감속을 유도할 수 있으므로
-    # 증가 방향만 천천히 반영
-    t_follow = ramp_t_follow(t_follow, self.t_follow_last, self._tf_decel_extra, DT_MDL)
+  def apply_t_follow(self, t_follow, adjust_t_follow=0.0):
+      # t_follow가 급격히 증가하면 목표거리도 급격히 증가하여 강한 감속을 유도할 수 있으므로
+      # 증가 방향만 천천히 반영
+      t_follow = ramp_t_follow(t_follow, self.t_follow_last, self._tf_decel_extra, DT_MDL)
 
-    self.t_follow_last = float(t_follow)
-    return float(t_follow + adjust_t_follow)
+      self.t_follow_last = float(t_follow)
+      return float(t_follow + adjust_t_follow)
 
   def update_stop_dist(self, stop_x):
     stop_x = self.xStopFilter.process(stop_x, median = True)
