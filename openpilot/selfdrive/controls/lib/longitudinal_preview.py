@@ -23,7 +23,7 @@ LEAD_ACCEL_MIN_TRACK_FRAMES = 3
 # How much tighter than the target distance the gap is allowed to be while
 # still engaging the lead-accel response (covers the stop -> launch moment,
 # where gap_margin sits near/at 0 rather than positive).
-LAUNCH_GAP_MARGIN_TOLERANCE_M = 2.0
+LAUNCH_GAP_MARGIN_TOLERANCE_M = 3.5
 CRUISE_SPEED_ERROR_DEADBAND = 1.0 / 3.6
 
 # Preview is an offset from the calibrated actuator action time. These bounds
