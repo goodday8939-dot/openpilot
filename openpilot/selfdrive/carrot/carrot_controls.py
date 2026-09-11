@@ -7,6 +7,7 @@ class CarrotControls:
     self.params = Params()
     self.lat_suspend_active = False
     self.lat_suspend_enter_t = 0.0
+    self.lat_suspend_exit_t = 0.0
 
   def lat_suspend_control(self, CS, latActive):
     suspend_angle = float(self.params.get_int("LatSuspendAngleDeg"))
@@ -36,9 +37,15 @@ class CarrotControls:
         (abs(CS.steeringAngleDeg) < resume_angle and not CS.steeringPressed)
         or (CS.vEgo >= (speed_limit_kph / 3.6))
       )
+      exit_delay_sec = 0.3
       if exit_cond:
-        self.lat_suspend_active = False
-        self.lat_suspend_enter_t = 0.0
+        self.lat_suspend_exit_t += DT_CTRL
+        if self.lat_suspend_exit_t >= exit_delay_sec:
+          self.lat_suspend_active = False
+          self.lat_suspend_enter_t = 0.0
+          self.lat_suspend_exit_t = 0.0
+      else:
+        self.lat_suspend_exit_t = 0.0
 
     if self.lat_suspend_active:
       latActive = False
