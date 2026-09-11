@@ -2336,6 +2336,23 @@
     },
     {
       "group": "조향일반",
+      "name": "AdjustCurveOffset",
+      "title": "조향일반: 커브구간 조절옵셋 (0)cm",
+      "descr": "레인모드와 무관하게 커브 구간에서 도로경계쪽/커브안쪽으로 보정합니다.",
+      "egroup": "LANE",
+      "etitle": "Steering: AdjustCurveOffset (0)cm",
+      "edescr": "Corrects toward the road edge/inside of the curve, independent of lane mode",
+      "cgroup": "转向",
+      "ctitle": "转向: 弯道偏移调整 (0)cm",
+      "cdescr": "与车道模式无关，向路缘/弯道内侧修正",
+      "min": 0,
+      "max": 500,
+      "default": 0,
+      "unit": 10,
+      "display_unit": "distanceCm"
+    },
+    {
+      "group": "조향일반",
       "name": "LaneChangeNeedTorque",
       "title": "차선변경 조향토크 사용",
       "descr": "-1:자동차선변경사용안함\n 0: 즉시 차선변경\n 1: 토크필요",
