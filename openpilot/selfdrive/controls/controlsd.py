@@ -71,6 +71,11 @@ class Controls:
     self.curvature = 0.0
     self.desired_curvature = 0.0
 
+    # 수동 LANECHANGE 명령으로 크루즈 꺼진 상태에서도 깜빡이만 켜기 위한 상태
+    self.manual_blinker_count = 0
+    self.manual_blinker_state = 0  # 0: none, 1: left, 2: right
+    self.manual_blinker_cmd_index_last = 0
+
     # VW MEB(ID.4/ID.5)에서만 사용. infiniteCable2 LatControlCurvature 정확 복제:
     # EnableCurvatureController=1(기본 ON) 상태의 곡률 폐루프 PID + useCarSteerCurvature 보정
     # (id4-meb 브랜치 실차 검증판). 게인은 opendbc values.py의 MEB_CURVATURE_PID_*가 단일 소스.
@@ -162,6 +167,17 @@ class Controls:
     if model_v2.meta.laneChangeState != LaneChangeState.off:
       CC.leftBlinker = model_v2.meta.laneChangeDirection == LaneChangeDirection.left
       CC.rightBlinker = model_v2.meta.laneChangeDirection == LaneChangeDirection.right
+
+    # 크루즈 꺼진 상태에서도 수동 LANECHANGE 명령(매크로드로이드 등)으로 깜빡이만 켜지도록
+    self.manual_blinker_count = max(0, self.manual_blinker_count - 1)
+    _cm = self.sm['carrotMan']
+    if _cm.carrotCmdIndex != self.manual_blinker_cmd_index_last and _cm.carrotCmd == "LANECHANGE":
+      self.manual_blinker_cmd_index_last = _cm.carrotCmdIndex
+      self.manual_blinker_count = int(0.2 / DT_CTRL)
+      self.manual_blinker_state = 1 if _cm.carrotArg == "LEFT" else 2
+    if self.manual_blinker_count > 0:
+      CC.leftBlinker = CC.leftBlinker or (self.manual_blinker_state == 1)
+      CC.rightBlinker = CC.rightBlinker or (self.manual_blinker_state == 2)
 
     if not CC.latActive:
       self.LaC.reset()

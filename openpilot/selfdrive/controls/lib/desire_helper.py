@@ -488,4 +488,6 @@ class DesireHelper:
       elif self.desire in (log.Desire.keepLeft, log.Desire.keepRight):
         self.desire = log.Desire.none
 
+    self.blinker_state = blinker_state
+    self.desire_enabled = desire_enabled
     return self.desire
