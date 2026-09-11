@@ -102,7 +102,14 @@ def clip_curvature(v_ego, prev_curvature, new_curvature, roll):
   min_lat_accel = -max_lateral_accel_no_roll + roll_compensation
   new_curvature, limited_accel = clamp(new_curvature, min_lat_accel / v_ego ** 2, max_lat_accel / v_ego ** 2)
 
-  new_curvature, limited_max_curv = clamp(new_curvature, -MAX_CURVATURE, MAX_CURVATURE)
+  # 저속(<=65km/h)에서 곡률 한계를 0.29로 완화, 65~85km/h 구간에서 부드럽게 원래값(0.2)으로 전환
+  max_curvature_low_speed = 0.29
+  max_curvature_speed_adjusted = float(np.interp(
+    v_ego,
+    [65 / 3.6, 85 / 3.6],
+    [max_curvature_low_speed, MAX_CURVATURE],
+  ))
+  new_curvature, limited_max_curv = clamp(new_curvature, -max_curvature_speed_adjusted, max_curvature_speed_adjusted)
   return float(new_curvature), limited_accel or limited_max_curv
 
 
