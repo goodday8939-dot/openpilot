@@ -2,7 +2,7 @@ from collections import deque
 
 import numpy as np
 from opendbc.can import CANPacker
-from opendbc.car import Bus, DT_CTRL, apply_driver_steer_torque_limits, common_fault_avoidance, make_tester_present_msg, structs, apply_std_steer_angle_limits
+from opendbc.car import Bus, DT_CTRL, apply_driver_steer_torque_limits, common_fault_avoidance, make_tester_present_msg, structs, apply_std_steer_angle_limits, CanData
 from opendbc.car.common.conversions import Conversions as CV
 from opendbc.car.hyundai import hyundaicanfd, hyundaican
 from opendbc.car.hyundai.carstate import CarState
@@ -174,6 +174,8 @@ def apply_steer_angle_limits_physics(desired_sw_deg: float,
 
 class CarController(CarControllerBase):
   def __init__(self, dbc_names, CP):
+    self.drive_mode_sent = False
+    self.drive_mode_counter = 0
     super().__init__(dbc_names, CP)
     self.CAN = CanBus(CP)
     self.params = CarControllerParams(CP)
@@ -513,7 +515,7 @@ class CarController(CarControllerBase):
           can_sends.extend(hyundaicanfd.create_lfa_icon_non_camera_scc(self.packer, CS, self.CAN, CC))
 
       # blinkers
-      if hda2 and self.CP.flags & HyundaiFlags.ENABLE_BLINKERS:
+      if self.CP.flags & HyundaiFlags.ENABLE_BLINKERS:
         can_sends.extend(hyundaicanfd.create_spas_messages(self.packer, self.CAN, self.frame, CC.leftBlinker, CC.rightBlinker))
 
       if self.camera_scc_params in [2, 3]:
@@ -612,6 +614,17 @@ class CarController(CarControllerBase):
     new_actuators.steeringAngleDeg = float(apply_angle)
     new_actuators.accel = accel
 
+    if not self.drive_mode_sent and self.frame > 200 and CS.out.vEgo < 0.1:
+      for _ in range(3):
+        b = bytearray(8)
+        b[3] = 0x30
+        b[2] = self.drive_mode_counter & 0xFF
+        crc = hyundaicanfd.hkg_can_fd_checksum(0x478, None, b)
+        b[0] = crc & 0xFF
+        b[1] = (crc >> 8) & 0xFF
+        can_sends.append(CanData(0x478, bytes(b), 0))
+        self.drive_mode_counter += 1
+      self.drive_mode_sent = True
     self.frame += 1
     return new_actuators, can_sends
 

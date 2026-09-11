@@ -722,7 +722,7 @@ class CAR(Platforms):
   GENESIS_GV70_EV_1ST_GEN = HyundaiCanFDPlatformConfig(
     [HyundaiCarDocs("Genesis GV70 EV 2020-2023", "All", car_parts=CarParts.common([CarHarness.hyundai_m]))],
     CarSpecs(mass=2230, wheelbase=2.87, steerRatio=14.6),
-    flags=HyundaiFlags.EV | HyundaiFlags.RADAR_SCC,
+    flags=HyundaiFlags.EV | HyundaiFlags.RADAR_SCC | HyundaiFlags.ENABLE_BLINKERS,
   )
   HYUNDAI_GRANDEUR_IG = HyundaiPlatformConfig(
     [HyundaiCarDocs("Hyundai Grandeur 2018-19", "All", car_parts=CarParts.common([CarHarness.hyundai_c]))],

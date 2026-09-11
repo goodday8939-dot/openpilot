@@ -87,6 +87,7 @@ const CanMsg HYUNDAI_CANFD_HDA2_LONG_TX_MSGS[] = {
 
   {0x4BE, 2, 8}, // NEW_MSG_4BE (may be corner radar enabler x)
   {0x4B9, 2, 8}, // NEW_MSG_4B9 (may be corner radar enabler)
+  {0x478, 0, 8}, // DRIVE_MODE (에코/컴포트/스포츠 버튼, carrot)
 };
 
 const CanMsg HYUNDAI_CANFD_HDA1_TX_MSGS[] = {
@@ -110,6 +111,8 @@ const CanMsg HYUNDAI_CANFD_HDA1_TX_MSGS[] = {
   {234, 2, 24}, // MDPS
   {687, 2, 8}, // STEER_TOUCH_2AF
 
+  {357, 0, 24}, // SPAS1
+  {362, 0, 32}, // SPAS2
 };
 
 
