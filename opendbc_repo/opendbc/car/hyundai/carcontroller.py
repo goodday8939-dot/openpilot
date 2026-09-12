@@ -514,9 +514,9 @@ class CarController(CarControllerBase):
         if not camera_scc:
           can_sends.extend(hyundaicanfd.create_lfa_icon_non_camera_scc(self.packer, CS, self.CAN, CC))
 
-      # blinkers
-      if self.CP.flags & HyundaiFlags.ENABLE_BLINKERS:
-        can_sends.extend(hyundaicanfd.create_spas_messages(self.packer, self.CAN, self.frame, CC.leftBlinker, CC.rightBlinker))
+#DIS#       # blinkers
+#DIS#       if self.CP.flags & HyundaiFlags.ENABLE_BLINKERS:
+#DIS#         can_sends.extend(hyundaicanfd.create_spas_messages(self.packer, self.CAN, self.frame, CC.leftBlinker, CC.rightBlinker))
 
       if self.camera_scc_params in [2, 3]:
         self.canfd_toggle_adas(CC, CS)
@@ -614,17 +614,17 @@ class CarController(CarControllerBase):
     new_actuators.steeringAngleDeg = float(apply_angle)
     new_actuators.accel = accel
 
-    if not self.drive_mode_sent and self.frame > 200 and CS.out.vEgo < 0.1:
-      for _ in range(3):
-        b = bytearray(8)
-        b[3] = 0x30
-        b[2] = self.drive_mode_counter & 0xFF
-        crc = hyundaicanfd.hkg_can_fd_checksum(0x478, None, b)
-        b[0] = crc & 0xFF
-        b[1] = (crc >> 8) & 0xFF
-        can_sends.append(CanData(0x478, bytes(b), 0))
-        self.drive_mode_counter += 1
-      self.drive_mode_sent = True
+#DIS#     if not self.drive_mode_sent and self.frame > 200 and CS.out.vEgo < 0.1:
+#DIS#       for _ in range(3):
+#DIS#         b = bytearray(8)
+#DIS#         b[3] = 0x30
+#DIS#         b[2] = self.drive_mode_counter & 0xFF
+#DIS#         crc = hyundaicanfd.hkg_can_fd_checksum(0x478, None, b)
+#DIS#         b[0] = crc & 0xFF
+#DIS#         b[1] = (crc >> 8) & 0xFF
+#DIS#         can_sends.append(CanData(0x478, bytes(b), 0))
+#DIS#         self.drive_mode_counter += 1
+#DIS#       self.drive_mode_sent = True
     self.frame += 1
     return new_actuators, can_sends
 
