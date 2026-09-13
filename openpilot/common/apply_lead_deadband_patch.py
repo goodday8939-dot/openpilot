@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Lowers LEAD_ACCEL_DEADBAND so the launch-response logic reacts to a lead
 car that has only just started creeping forward (small positive lead accel),
-instead of waiting until the lead's acceleration exceeds 0.10 m/s^2.
+instead of waiting until the lead's acceleration exceeds 0.075 m/s^2.
 
 Run once on the comma device:
   PYTHONPATH=/data/openpilot /usr/local/venv/bin/python3 /data/openpilot/apply_lead_deadband_patch.py
@@ -13,10 +13,10 @@ import sys
 
 TARGET = "/data/openpilot/openpilot/selfdrive/controls/lib/longitudinal_preview.py"
 
-OLD_LINE = "LEAD_ACCEL_DEADBAND = 0.10\n"
-NEW_LINE = "LEAD_ACCEL_DEADBAND = 0.06  # lowered from 0.10: react sooner to a lead that just started creeping\n"
+OLD_LINE = "LEAD_ACCEL_DEADBAND = 0.075\n"
+NEW_LINE = "LEAD_ACCEL_DEADBAND = 0.05  # lowered from 0.075: react sooner to a lead that just started creeping\n"
 
-MARKER = "lowered from 0.10"
+MARKER = "lowered from 0.075"
 
 
 def main():
