@@ -105,7 +105,7 @@ class CarrotPlanner:
 
     self.stop_distance = 6.0
     self.trafficStopDistanceAdjust = 2.5 #params.get_float("TrafficStopDistanceAdjust") / 100.
-    self.comfortBrake = 2.4
+    self.comfortBrake = 1.8  # softened from 2.4
     self.comfort_brake = self.comfortBrake
 
     self.soft_hold_active = 0
@@ -216,7 +216,8 @@ class CarrotPlanner:
   def get_carrot_accel(self, v_ego):
     cruiseMaxVals = [self.cruiseMaxVals0, self.cruiseMaxVals1, self.cruiseMaxVals2, self.cruiseMaxVals3, self.cruiseMaxVals4, self.cruiseMaxVals5, self.cruiseMaxVals6]
     factor = self.myHighModeFactor if self.myDrivingMode == DrivingMode.High else self.mySafeFactor
-    return np.interp(v_ego, A_CRUISE_MAX_BP_CARROT, cruiseMaxVals) * factor
+    ACCEL_SOFTEN_FACTOR = 0.75  # user-requested: soften lead-follow accel to 3/4
+    return np.interp(v_ego, A_CRUISE_MAX_BP_CARROT, cruiseMaxVals) * factor * ACCEL_SOFTEN_FACTOR
 
   def _get_base_t_follow(self, personality, v_ego):
     if self.enableSpeedTF < 0:
