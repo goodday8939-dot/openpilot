@@ -100,11 +100,11 @@ MODE_TUNING = {
 # acceleration, lead-distance, danger-zone, turn and cut-in limits are not
 # changed by these factors.
 LEAD_ACCEL_RESPONSE_TUNING = {
-  1: LeadAccelResponseTuning(0.00, 0.00, 0.85, 0.95),
-  2: LeadAccelResponseTuning(0.10, -0.05, 0.65, 0.80),
-  3: LeadAccelResponseTuning(0.25, -0.10, 0.40, 0.60),
-  4: LeadAccelResponseTuning(0.40, -0.15, 0.18, 0.35),
-  5: LeadAccelResponseTuning(0.50, -0.20, 0.05, 0.15),
+  1: LeadAccelResponseTuning(0.10, -0.05, 0.65, 0.80),
+  2: LeadAccelResponseTuning(0.25, -0.10, 0.40, 0.60),
+  3: LeadAccelResponseTuning(0.40, -0.15, 0.18, 0.35),
+  4: LeadAccelResponseTuning(0.50, -0.20, 0.05, 0.15),
+  5: LeadAccelResponseTuning(0.625, -0.25, 0.0139, 0.064),
 }
 
 
