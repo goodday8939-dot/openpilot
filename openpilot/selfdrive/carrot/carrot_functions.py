@@ -337,8 +337,11 @@ class CarrotPlanner:
     # 함. 이 속도(km/h)를 넘으면 좁힌 값 대신 TFollowGap4(원래 "여유있는" 단계) 기준
     # 간격으로 복귀시켜, 고속에서까지 좁은 차간거리가 그대로 유지되는 걸 방지한다.
     v_kph = v_ego * CV.MS_TO_KPH
-    if v_kph > HIGH_SPEED_TF_FLOOR_KPH:
+    if v_kph > 80.0:
       high_speed_floor = float(self.tFollowGap4) * self.myTFollowFactor
+      tf_adjusted = max(tf_adjusted, high_speed_floor)
+    elif v_kph > HIGH_SPEED_TF_FLOOR_KPH:
+      high_speed_floor = float(self.tFollowGap3) * self.myTFollowFactor
       tf_adjusted = max(tf_adjusted, high_speed_floor)
     tf_final = self._clip_t_follow(tf_adjusted)
     self._tf_applied = float(tf_final)
