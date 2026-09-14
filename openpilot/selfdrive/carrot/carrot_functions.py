@@ -307,7 +307,7 @@ class CarrotPlanner:
     tf_min = float(min(self.tFollowGap1, self.tFollowGap2, self.tFollowGap3, self.tFollowGap4))
     tf_max = float(max(self.tFollowGap1, self.tFollowGap2, self.tFollowGap3, self.tFollowGap4))
     tf_max = get_t_follow_mode_max(tf_max, self.myTFollowFactor, self._tf_decel_extra)
-    return float(np.clip(t_follow, max(0.3, tf_min), tf_max))
+    return float(np.clip(t_follow, max(0.15, tf_min), tf_max))  # lowered floor from 0.3
 
   def get_T_FOLLOW(self, personality=log.LongitudinalPersonality.standard, v_ego=0.0, a_ego=0.0,
                    lead_status=False, lead_accel=0.0):
