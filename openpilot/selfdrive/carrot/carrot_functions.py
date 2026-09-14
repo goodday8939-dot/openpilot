@@ -311,11 +311,12 @@ class CarrotPlanner:
 
   def get_T_FOLLOW(self, personality=log.LongitudinalPersonality.standard, v_ego=0.0, a_ego=0.0,
                    lead_status=False, lead_accel=0.0):
+    v_kph_now = v_ego * CV.MS_TO_KPH
     force_tf1_target = (
       lead_status
       and np.isfinite(lead_accel)
       and lead_accel > LEAD_ACCEL_DEADBAND
-      and personality == log.LongitudinalPersonality.aggressive
+      and (personality == log.LongitudinalPersonality.aggressive or v_kph_now < 55.0)
       and self.leadAccelResponse >= LEAD_ACCEL_TF1_FORCE_MIN
     )
     if force_tf1_target:
