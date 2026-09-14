@@ -216,8 +216,7 @@ class CarrotPlanner:
   def get_carrot_accel(self, v_ego):
     cruiseMaxVals = [self.cruiseMaxVals0, self.cruiseMaxVals1, self.cruiseMaxVals2, self.cruiseMaxVals3, self.cruiseMaxVals4, self.cruiseMaxVals5, self.cruiseMaxVals6]
     factor = self.myHighModeFactor if self.myDrivingMode == DrivingMode.High else self.mySafeFactor
-    ACCEL_SOFTEN_FACTOR = 0.75  # user-requested: soften lead-follow accel to 3/4
-    return np.interp(v_ego, A_CRUISE_MAX_BP_CARROT, cruiseMaxVals) * factor * ACCEL_SOFTEN_FACTOR
+    return np.interp(v_ego, A_CRUISE_MAX_BP_CARROT, cruiseMaxVals) * factor
 
   def _get_base_t_follow(self, personality, v_ego):
     if self.enableSpeedTF < 0:
