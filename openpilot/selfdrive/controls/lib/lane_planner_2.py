@@ -166,7 +166,7 @@ class LanePlanner:
     _t_fade = np.clip((abs(curve_speed) - 30.0) / (200.0 - 30.0), 0.0, 1.0)
     _fade_scale = 1.0 - (_t_fade * _t_fade * (3 - 2 * _t_fade))
     _t_strong = np.clip((abs(curve_speed) - 30.0) / (60.0 - 30.0), 0.0, 1.0)
-    _strong_scale = 1.0 + (1.0 - (_t_strong * _t_strong * (3 - 2 * _t_strong))) * 0.4
+    _strong_scale = 1.0 + (1.0 - (_t_strong * _t_strong * (3 - 2 * _t_strong))) * 0.7  # raised from 0.4 (max 1.4x -> 1.7x)
     offset_curve = self.adjustCurveOffset * _fade_scale * _strong_scale * np.sign(curve_speed)
 
     offset_lane = 0.0
