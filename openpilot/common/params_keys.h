@@ -317,11 +317,19 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"SoundLanguageSetting", {PERSISTENT, STRING, "auto"}},
 
     {"TFollowGap1", {PERSISTENT, INT, "110"}},
+    {"ComfortBrakeCarrot", {PERSISTENT, INT, "14"}},
+    {"FixedGapDelta1Cm", {PERSISTENT, INT, "50"}},
+    {"FixedGapDelta2Cm", {PERSISTENT, INT, "100"}},
+    {"FixedGapDelta3Cm", {PERSISTENT, INT, "150"}},
+    {"FixedGapDelta4Cm", {PERSISTENT, INT, "250"}},
+    {"LeadAccelPushSeconds", {PERSISTENT, INT, "75"}},
     {"TFollowGap2", {PERSISTENT, INT, "120"}},
     {"TFollowGap3", {PERSISTENT, INT, "140"}},
     {"TFollowGap4", {PERSISTENT, INT, "160"}},
 
     {"DynamicTFollow", {PERSISTENT, INT, "0"}},
+    {"DynamicTFollowDecel", {PERSISTENT, INT, "0"}},
+    {"DynamicTFollowAccel", {PERSISTENT, INT, "0"}},
     {"LeadAccelResponse", {PERSISTENT, INT, "0"}},
     {"DynamicTFollowLC", {PERSISTENT, INT, "100"}},
     {"TFollowDecelBoost", {PERSISTENT, INT, "50"}},
@@ -335,6 +343,8 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
 
     {"AdjustLaneOffset", {PERSISTENT, INT, "0"}},
     {"AdjustCurveOffset", {PERSISTENT, INT, "0"}},
+    {"AdjustCurveMaxBoost", {PERSISTENT, INT, "70"}},
+    {"AdjustOffsetLimitCm", {PERSISTENT, INT, "40"}},
     {"LaneChangeNeedTorque", {PERSISTENT, INT, "0"}},
     {"LaneChangeDelay", {PERSISTENT, INT, "0"}},
     {"LaneChangeBsd", {PERSISTENT, INT, "0"}},

@@ -251,7 +251,9 @@
                 "TurnSpeedControlMode",
                 "MapTurnSpeedFactor",
                 "ModelTurnSpeedFactor",
-                "ApplyModelSpeed"
+                "ApplyModelSpeed",
+                "AdjustCurveMaxBoost",
+                "AdjustOffsetLimitCm"
               ]
             },
             {
@@ -314,7 +316,8 @@
                 "StopDistanceCarrot",
                 "StoppingAccel",
                 "VEgoStopping",
-                "AChangeCostStarting"
+                "AChangeCostStarting",
+                "ComfortBrakeCarrot"
               ]
             },
             {
@@ -339,11 +342,17 @@
                 "TFollowGap2",
                 "TFollowGap3",
                 "TFollowGap4",
-                "DynamicTFollow",
                 "LeadAccelResponse",
                 "DynamicTFollowLC",
                 "EnableSpeedTF",
-                "TFollowDecelBoost"
+                "TFollowDecelBoost",
+                "LeadAccelPushSeconds",
+                "DynamicTFollowDecel",
+                "DynamicTFollowAccel",
+                "FixedGapDelta1Cm",
+                "FixedGapDelta2Cm",
+                "FixedGapDelta3Cm",
+                "FixedGapDelta4Cm"
               ]
             },
             {
@@ -1259,7 +1268,9 @@
       "cgroup": "纵向控制",
       "ctitle": "纵向 KpV(100)x0.01",
       "cdescr": "纵向控制比例增益。现代、起亚和捷尼赛思车型为确保安全固定为 Kp 1.0，因此不会显示或应用此设置。",
-      "hidden_brands": ["hyundai"],
+      "hidden_brands": [
+        "hyundai"
+      ],
       "min": 0,
       "max": 200,
       "default": 100,
@@ -1276,7 +1287,9 @@
       "cgroup": "纵向控制",
       "ctitle": "纵向 Kf(100)x0.01",
       "cdescr": "在加速和制动方向预先应用目标加速度。现代、起亚和捷尼赛思车型为确保安全固定为 Kf 1.0，因此不会显示或应用此设置。",
-      "hidden_brands": ["hyundai"],
+      "hidden_brands": [
+        "hyundai"
+      ],
       "min": 0,
       "max": 200,
       "default": 100,
@@ -1293,7 +1306,9 @@
       "cgroup": "纵向控制",
       "ctitle": "纵向 KiV(0)x0.01",
       "cdescr": "纵向控制积分增益。现代、起亚和捷尼赛思车型为确保安全固定为 Ki 0，因此不会显示或应用此设置。",
-      "hidden_brands": ["hyundai"],
+      "hidden_brands": [
+        "hyundai"
+      ],
       "min": 0,
       "max": 2000,
       "default": 0,
@@ -2676,6 +2691,38 @@
       "unit": 5
     },
     {
+      "group": "감속제어",
+      "name": "ComfortBrakeCarrot",
+      "title": "컴포트브레이크x0.1(14)",
+      "descr": "감속 시 편안함 정도. 값이 작을수록 브레이크를 더 부드럽게(꾸욱) 밟는 느낌, 클수록 더 급하게 제동합니다.",
+      "egroup": "DECEL",
+      "etitle": "ComfortBrake x0.1(14)",
+      "edescr": "Braking comfort. Lower = softer/gentler braking feel, higher = sharper braking.",
+      "cgroup": "减速控制",
+      "ctitle": "舒适刹车x0.1(14)",
+      "cdescr": "制动舒适度，数值越小刹车越柔和",
+      "min": 8,
+      "max": 50,
+      "default": 14,
+      "unit": 1
+    },
+    {
+      "group": "가속설정",
+      "name": "LeadAccelPushSeconds",
+      "title": "가속지속시간x0.01s(75)",
+      "descr": "앞차 출발/가속에 반응할 때 강하게 미는 가속을 유지하는 시간. 값이 클수록 짧게 튀었다 빠지지 않고 더 오래 밀어붙이는 느낌입니다.",
+      "egroup": "ACCEL",
+      "etitle": "LeadAccelPush x0.01s(75)",
+      "edescr": "How long the strong push-acceleration is sustained when reacting to a lead pulling away.",
+      "cgroup": "加速设置",
+      "ctitle": "加速持续时间x0.01s(75)",
+      "cdescr": "响应前车起步/加速时，强力加速持续的时间",
+      "min": 25,
+      "max": 150,
+      "default": 75,
+      "unit": 5
+    },
+    {
       "group": "차량간격",
       "name": "TFollowGap2",
       "title": "TF(2): 차량간격시간2x0.01s(120)",
@@ -3653,6 +3700,141 @@
           "Speed automatic"
         ]
       }
+    },
+    {
+      "group": "커브·턴",
+      "name": "AdjustCurveMaxBoost",
+      "title": "커브: 커브정점 최대증폭 x0.01 (70)",
+      "descr": "커브 정점(가장 급한 지점)에서 커브옵셋을 얼마나 더 강하게 증폭할지 정합니다. 값을 올리면 더 아웃코스로(바깥쪽으로) 밀어내고, 내리면 인코스(안쪽) 성향이 강해집니다. 현재 AdjustCurveOffset이 바깥쪽 방향으로 설정되어 있음을 전제로 합니다.",
+      "egroup": "CURVE",
+      "etitle": "Curve: Apex Max Boost x0.01 (70)",
+      "edescr": "How strongly the curve offset is amplified at the sharpest point of a curve. Higher = pushes further to the outside of the curve; lower = more inside-of-curve tendency. Assumes AdjustCurveOffset is currently set toward the outside.",
+      "cgroup": "弯道与转弯",
+      "ctitle": "弯道: 顶点最大放大 x0.01 (70)",
+      "cdescr": "设置在弯道最急处对偏移量的放大程度。数值越大越偏向弯道外侧，越小则内切倾向越强。前提是 AdjustCurveOffset 当前设置为偏向外侧。",
+      "min": 0,
+      "max": 150,
+      "default": 70,
+      "unit": 5
+    },
+    {
+      "group": "차량간격",
+      "name": "DynamicTFollowDecel",
+      "title": "앞차 감속 시 반응(0%)",
+      "descr": "앞차가 감속할 때 목표 간격을 얼마나 늘릴지 정합니다. 0%는 사용 안 함, 값이 클수록 앞차 감속에 민첩하게 거리를 벌립니다. 가속 반응과 별도로 조절됩니다.",
+      "egroup": "FDIST",
+      "etitle": "Lead Decel Response (0%)",
+      "edescr": "How much the target gap increases when the lead slows down. 0% disables it; higher values open the gap faster. Tuned independently from the accel response.",
+      "cgroup": "跟车距离",
+      "ctitle": "前车减速响应 (0%)",
+      "cdescr": "设置前车减速时目标车距增大的程度。0% 表示关闭；数值越嫘车距拉开越快。与加速响应分开调节。",
+      "min": 0,
+      "max": 100,
+      "default": 0,
+      "unit": 1,
+      "display_unit": "percent"
+    },
+    {
+      "group": "차량간격",
+      "name": "DynamicTFollowAccel",
+      "title": "앞차 가속 시 반응(0%)",
+      "descr": "앞차가 가속할 때 목표 간격을 얼마나 줄일지 정합니다. 0%는 사용 안 함, 값이 클수록 앞차 가속에 민첩하게 거리를 좁힙니다. 감속 반응과 별도로 조절됩니다.",
+      "egroup": "FDIST",
+      "etitle": "Lead Accel Response (0%)",
+      "edescr": "How much the target gap decreases when the lead speeds up. 0% disables it; higher values close the gap faster. Tuned independently from the decel response.",
+      "cgroup": "跟车距离",
+      "ctitle": "前车加速响应 (0%)",
+      "cdescr": "设置前车加速时目标车距缩小的程度。0% 表示关闭；数值越高车距缩小越快。与减速响应分开调节。",
+      "min": 0,
+      "max": 100,
+      "default": 0,
+      "unit": 1,
+      "display_unit": "percent"
+    },
+    {
+      "group": "커브·턴",
+      "name": "AdjustOffsetLimitCm",
+      "title": "커브: 오프셋 상한선 (40)cm",
+      "descr": "커브·차선 보정 오프셋이 최종적으로 넘지 못하는 절대 상한선입니다. 기본값 40cm. 커브정점 최대증폭을 올려도 여기서 잘릴 수 있으니, 필요하면 같이 올려주세요. 이 값은 커브뿐 아니라 다른 보정 상황에도 공통으로 적용되는 안전 상한선이니 너무 크게 올리지 않는 게 좋습니다.",
+      "egroup": "CURVE",
+      "etitle": "Curve: Offset Hard Limit (40)cm",
+      "edescr": "Absolute cap on the total lane/curve correction offset. Default 40cm. Raising the curve apex boost may hit this ceiling, so raise this too if needed. This is a shared safety cap, not curve-only, so avoid setting it very high.",
+      "cgroup": "弯道与转弯",
+      "ctitle": "弯道: 偏移上限 (40)cm",
+      "cdescr": "车道/弯道修正偏移量的最终绝对上限，默认40cm。提高弯道顶点放大倍数时可能被这里截断，需要时请一并提高。此值是通用安全上限，不建议设置过大。",
+      "min": 10,
+      "max": 100,
+      "default": 40,
+      "unit": 5,
+      "display_unit": "distanceCm"
+    },
+    {
+      "group": "차량간격",
+      "name": "FixedGapDelta1Cm",
+      "title": "추종거리(45↓): 정지거리+(50)cm",
+      "descr": "45km/h 이하 구간에서 정지거리 위에 추가로 더할 거리입니다. 정지거리를 바꿔도 이 추가분은 그대로 유지됩니다.",
+      "egroup": "FDIST",
+      "etitle": "Follow Gap Zone1(<45kph): stop_distance+(50)cm",
+      "edescr": "Extra distance added on top of stop distance below 45km/h. Stays constant even if stop distance changes.",
+      "cgroup": "跟车距离",
+      "ctitle": "跟随车距(45↓): 停车距离+(50)cm",
+      "cdescr": "45km/h以下时在停车距离基础上额外增加的距离。停车距离改变时此增量保持不变。",
+      "min": 0,
+      "max": 300,
+      "default": 50,
+      "unit": 5,
+      "display_unit": "distanceCm"
+    },
+    {
+      "group": "차량간격",
+      "name": "FixedGapDelta2Cm",
+      "title": "추종거리(60↓): 정지거리+(100)cm",
+      "descr": "60km/h 이하 구간에서 정지거리 위에 추가로 더할 거리입니다.",
+      "egroup": "FDIST",
+      "etitle": "Follow Gap Zone2(<60kph): stop_distance+(100)cm",
+      "edescr": "Extra distance added on top of stop distance below 60km/h.",
+      "cgroup": "跟车距离",
+      "ctitle": "跟随车距(60↓): 停车距离+(100)cm",
+      "cdescr": "60km/h以下时在停车距离基础上额外增加的距离。",
+      "min": 0,
+      "max": 300,
+      "default": 100,
+      "unit": 5,
+      "display_unit": "distanceCm"
+    },
+    {
+      "group": "차량간격",
+      "name": "FixedGapDelta3Cm",
+      "title": "추종거리(80↓): 정지거리+(150)cm",
+      "descr": "80km/h 이하 구간에서 정지거리 위에 추가로 더할 거리입니다.",
+      "egroup": "FDIST",
+      "etitle": "Follow Gap Zone3(<80kph): stop_distance+(150)cm",
+      "edescr": "Extra distance added on top of stop distance below 80km/h.",
+      "cgroup": "跟车距离",
+      "ctitle": "跟随车距(80↓): 停车距离+(150)cm",
+      "cdescr": "80km/h以下时在停车距离基础上额外增加的距离。",
+      "min": 0,
+      "max": 300,
+      "default": 150,
+      "unit": 5,
+      "display_unit": "distanceCm"
+    },
+    {
+      "group": "차량간격",
+      "name": "FixedGapDelta4Cm",
+      "title": "추종거리(100↓): 정지거리+(250)cm",
+      "descr": "100km/h 이하 구간에서 정지거리 위에 추가로 더할 거리입니다. 100km/h를 넘으면 이 고정거리 로직 자체가 꺼지고 TFollowGap 시간간격 방식으로 전환됩니다.",
+      "egroup": "FDIST",
+      "etitle": "Follow Gap Zone4(<100kph): stop_distance+(250)cm",
+      "edescr": "Extra distance added on top of stop distance below 100km/h. Above 100km/h this fixed-gap logic turns off and the TFollowGap time-gap system takes over.",
+      "cgroup": "跟车距离",
+      "ctitle": "跟随车距(100↓): 停车距离+(250)cm",
+      "cdescr": "100km/h以下时在停车距离基础上额外增加的距离。超过100km/h后此固定车距逻辑关闭，改用TFollowGap时间间隔方式。",
+      "min": 0,
+      "max": 300,
+      "default": 250,
+      "unit": 5,
+      "display_unit": "distanceCm"
     }
   ]
 }

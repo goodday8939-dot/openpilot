@@ -103,7 +103,7 @@ LEAD_ACCEL_RESPONSE_TUNING = {
   1: LeadAccelResponseTuning(0.10, -0.05, 0.65, 0.80),
   2: LeadAccelResponseTuning(0.25, -0.10, 0.40, 0.60),
   3: LeadAccelResponseTuning(0.40, -0.15, 0.18, 0.35),
-  4: LeadAccelResponseTuning(0.50, -0.20, 0.05, 0.15),
+  4: LeadAccelResponseTuning(0.75, -0.30, 0.04, 0.12),
   5: LeadAccelResponseTuning(0.625, -0.25, 0.0139, 0.064),
 }
 

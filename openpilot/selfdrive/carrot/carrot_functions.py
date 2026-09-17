@@ -11,12 +11,39 @@ from openpilot.selfdrive.carrot.t_follow import get_t_follow_mode_factor, get_t_
 from openpilot.selfdrive.carrot.traffic_stop import TrafficStopModelLeadMatcher, is_traffic_stop_entry_allowed
 from openpilot.selfdrive.controls.radar_constants import RADAR_TO_CAMERA
 from openpilot.selfdrive.controls.lib.longitudinal_preview import LEAD_ACCEL_DEADBAND, LEAD_ACCEL_TF1_FORCE_MIN
+import openpilot.selfdrive.controls.lib.longitudinal_preview as longitudinal_preview
 from openpilot.selfdrive.selfdrived.events import Events
 
 # Above this speed (km/h), tightened low-speed t_follow targets (e.g. for
 # congested/stop-and-go driving) no longer apply on their own -- get_T_FOLLOW
 # floors the result at the TFollowGap4-based gap instead.
 HIGH_SPEED_TF_FLOOR_KPH = 50.0
+
+# --- Fixed-distance low/mid speed following -----------------------------
+# Below FIXED_GAP_ZONE2_KPH, hold a flat target distance instead of letting
+# the gap grow with speed, so slow city traffic doesn't open up enough for
+# other cars to cut in. Applies whenever a lead is tracked, whether or not
+# it is currently accelerating (unlike the old force_tf1_target rule, which
+# reverted to the loose personality-based gap the moment the lead stopped
+# accelerating).
+FIXED_GAP_ZONE1_KPH = 45.0
+FIXED_GAP_ZONE1_DELTA_M = 0.5  # extra distance added on top of stop_distance in this zone
+FIXED_GAP_ZONE2_KPH = 60.0
+FIXED_GAP_ZONE2_DELTA_M = 1.0  # extra distance added on top of stop_distance in this zone
+FIXED_GAP_ZONE3_KPH = 80.0
+FIXED_GAP_ZONE3_DELTA_M = 1.5  # extra distance added on top of stop_distance in this zone
+# Above this speed the fixed-distance zone ends entirely and the old
+# speed-scaling/floor logic takes back over -- real highway closing speeds
+# need a gap that grows with speed, not a flat number.
+FIXED_GAP_ZONE4_KPH = 100.0
+FIXED_GAP_ZONE4_DELTA_M = 2.5  # extra distance added on top of stop_distance in this zone
+# Below this speed, solving for the exact meter target would require an
+# unrealistically long implied time-gap (target_m/v blows up near a stop),
+# so just fall back to the tightest configured gap instead.
+FIXED_GAP_MIN_V_MS = 1.0
+# Sanity ceiling on the implied time-gap so a near-stationary edge case never
+# hands the MPC an extreme value.
+FIXED_GAP_MAX_T_FOLLOW = 1.2
 
 EventName = log.OnroadEvent.EventName
 LaneChangeState = log.LaneChangeState
@@ -105,7 +132,7 @@ class CarrotPlanner:
 
     self.stop_distance = 6.0
     self.trafficStopDistanceAdjust = 2.5 #params.get_float("TrafficStopDistanceAdjust") / 100.
-    self.comfortBrake = 1.8  # softened from 2.4
+    self.comfortBrake = 1.4  # fallback default; live value overrides below via ComfortBrakeCarrot
     self.comfort_brake = self.comfortBrake
 
     self.soft_hold_active = 0
@@ -191,10 +218,21 @@ class CarrotPlanner:
       self.tFollowGap3 = self.params.get_float("TFollowGap3") / 100.
       self.tFollowGap4 = self.params.get_float("TFollowGap4") / 100.
       self.dynamicTFollow = self.params.get_float("DynamicTFollow") / 100.
+      self.dynamicTFollowDecel = self.params.get_float("DynamicTFollowDecel") / 100.
+      self.dynamicTFollowAccel = self.params.get_float("DynamicTFollowAccel") / 100.
       self.leadAccelResponse = int(np.clip(self.params.get_int("LeadAccelResponse"), 0, 5))
       self.dynamicTFollowLC = self.params.get_float("DynamicTFollowLC") / 100.
       self.enableSpeedTF = self.params.get_int("EnableSpeedTF")
       self.tFollowDecelBoost = self.params.get_float("TFollowDecelBoost") / 100.
+      self.comfortBrake = self.params.get_int("ComfortBrakeCarrot") / 10.
+      self.fixedGapDelta1 = self.params.get_int("FixedGapDelta1Cm") / 100.
+      self.fixedGapDelta2 = self.params.get_int("FixedGapDelta2Cm") / 100.
+      self.fixedGapDelta3 = self.params.get_int("FixedGapDelta3Cm") / 100.
+      self.fixedGapDelta4 = self.params.get_int("FixedGapDelta4Cm") / 100.
+      _lead_accel_push_s = self.params.get_int("LeadAccelPushSeconds") / 100.
+      _t4 = longitudinal_preview.LEAD_ACCEL_RESPONSE_TUNING[4]
+      longitudinal_preview.LEAD_ACCEL_RESPONSE_TUNING[4] = longitudinal_preview.LeadAccelResponseTuning(
+        _lead_accel_push_s, _t4.closing_speed_floor, _t4.a_change_cost_factor, _t4.jerk_cost_factor)
     elif self.params_count == 30:
       self.cruiseMaxVals0 = self.params.get_float("CruiseMaxVals0") / 100.
       self.cruiseMaxVals1 = self.params.get_float("CruiseMaxVals1") / 100.
@@ -312,17 +350,43 @@ class CarrotPlanner:
   def get_T_FOLLOW(self, personality=log.LongitudinalPersonality.standard, v_ego=0.0, a_ego=0.0,
                    lead_status=False, lead_accel=0.0):
     v_kph_now = v_ego * CV.MS_TO_KPH
+
+    # Below FIXED_GAP_ZONE2_KPH, hold a flat target distance regardless of
+    # whether the lead is accelerating or holding a steady speed -- this is
+    # what keeps low-speed traffic tight enough that other cars stop cutting
+    # in, instead of reverting to a looser gap the moment the lead settles.
+    fixed_gap_zone = lead_status and v_kph_now < FIXED_GAP_ZONE4_KPH
+    self._fixed_gap_active = fixed_gap_zone  # let dynamic_t_follow() know to stand down
     force_tf1_target = (
-      lead_status
+      not fixed_gap_zone
+      and lead_status
       and np.isfinite(lead_accel)
       and lead_accel > LEAD_ACCEL_DEADBAND
-      and (personality == log.LongitudinalPersonality.aggressive or v_kph_now < 55.0)
+      and personality == log.LongitudinalPersonality.aggressive
       and self.leadAccelResponse >= LEAD_ACCEL_TF1_FORCE_MIN
     )
-    if force_tf1_target:
-      # Levels 4-5 keep the driver's Gap 1 target authoritative only while a
-      # tracked lead is positively accelerating and the gap is opening. A
-      # neutral/decelerating lead returns to normal gap processing at once.
+    if fixed_gap_zone:
+      if v_kph_now < FIXED_GAP_ZONE1_KPH:
+        target_m = self.stop_distance + self.fixedGapDelta1
+      elif v_kph_now < FIXED_GAP_ZONE2_KPH:
+        target_m = self.stop_distance + self.fixedGapDelta2
+      elif v_kph_now < FIXED_GAP_ZONE3_KPH:
+        target_m = self.stop_distance + self.fixedGapDelta3
+      else:
+        target_m = self.stop_distance + self.fixedGapDelta4
+      if v_ego > FIXED_GAP_MIN_V_MS:
+        # desired_follow_distance(v_ego==v_lead) ~= stop_distance + t_follow*v_ego,
+        # so solve for the t_follow that makes that sum equal target_m.
+        tf_needed = (target_m - self.stop_distance) / v_ego
+        tf_mode_target = float(np.clip(tf_needed, 0.0, FIXED_GAP_MAX_T_FOLLOW))
+      else:
+        # Too close to a standstill for target_m/v_ego to mean anything sane;
+        # fall back to the tightest configured gap instead.
+        tf_mode_target = float(self.tFollowGap1)
+    elif force_tf1_target:
+      # Above FIXED_GAP_ZONE4_KPH, an aggressive-personality driver still gets
+      # Gap 1 authoritative while a tracked lead is positively accelerating.
+      # A neutral/decelerating lead returns to normal gap processing at once.
       tf_mode_target = float(self.tFollowGap1)
     else:
       tf_base = self._get_base_t_follow(personality, v_ego)
@@ -331,18 +395,29 @@ class CarrotPlanner:
       # mode-scaled domain. Applying the mode factor after the hold compounded
       # Safe's 1.2 factor every cycle while decelerating.
       tf_mode_target = float(tf_target * self.myTFollowFactor)
-    tf_adjusted = self._apply_decel_hold_and_boost_t_follow(tf_mode_target, a_ego)
-    # HIGH_SPEED_TF_FLOOR_KPH: 정체구간에서 tf_base를 좁혀도 그건 저속 전용 설정이어야
-    # 함. 이 속도(km/h)를 넘으면 좁힌 값 대신 TFollowGap4(원래 "여유있는" 단계) 기준
-    # 간격으로 복귀시켜, 고속에서까지 좁은 차간거리가 그대로 유지되는 걸 방지한다.
-    v_kph = v_ego * CV.MS_TO_KPH
-    if v_kph > 80.0:
-      high_speed_floor = float(self.tFollowGap4) * self.myTFollowFactor
-      tf_adjusted = max(tf_adjusted, high_speed_floor)
-    elif v_kph > HIGH_SPEED_TF_FLOOR_KPH:
-      high_speed_floor = float(self.tFollowGap3) * self.myTFollowFactor
-      tf_adjusted = max(tf_adjusted, high_speed_floor)
-    tf_final = self._clip_t_follow(tf_adjusted)
+    if fixed_gap_zone:
+      self._tf_applied = float(tf_mode_target)
+      self._tf_decel_extra = 0.0
+      tf_adjusted = float(tf_mode_target)
+    else:
+      tf_adjusted = self._apply_decel_hold_and_boost_t_follow(tf_mode_target, a_ego)
+
+    if fixed_gap_zone:
+      # The whole point of this zone is to stay tight below FIXED_GAP_ZONE4_KPH,
+      # so skip the high-speed floor below -- it would just undo the fixed target.
+      tf_final = float(np.clip(tf_adjusted, 0.0, 2.5))
+    else:
+      # HIGH_SPEED_TF_FLOOR_KPH: 정체구간에서 tf_base를 좁혀도 그건 저속 전용 설정이어야
+      # 함. 이 속도(km/h)를 넘으면 좁힌 값 대신 TFollowGap4(원래 "여유있는" 단계) 기준
+      # 간격으로 복귀시켜, 고속에서까지 좁은 차간거리가 그대로 유지되는 걸 방지한다.
+      v_kph = v_ego * CV.MS_TO_KPH
+      if v_kph > 80.0:
+        high_speed_floor = float(self.tFollowGap4) * self.myTFollowFactor
+        tf_adjusted = max(tf_adjusted, high_speed_floor)
+      elif v_kph > HIGH_SPEED_TF_FLOOR_KPH:
+        high_speed_floor = float(self.tFollowGap3) * self.myTFollowFactor
+        tf_adjusted = max(tf_adjusted, high_speed_floor)
+      tf_final = self._clip_t_follow(tf_adjusted)
     self._tf_applied = float(tf_final)
     return self.apply_t_follow(tf_final)
 
@@ -360,6 +435,10 @@ class CarrotPlanner:
 
 
   def dynamic_t_follow(self, t_follow, lead, desired_follow_distance, prev_a):
+    if getattr(self, "_fixed_gap_active", False):
+      # Fixed-gap zone target is authoritative; skip the jLead-based nudging
+      # so a lead accel/decel blip cannot widen or narrow it back open.
+      return t_follow
     self.jerk_factor_apply = self.jerk_factor
 
     # 차선변경 시작 후 1.5초 동안은 공격적으로
@@ -369,10 +448,12 @@ class CarrotPlanner:
       self.jerk_factor_apply = self.jerk_factor * dynamicTFollowLC
 
     # 일반 lead follow: lead.jLead 기반 동적 조절
-    elif lead.status and self.dynamicTFollow > 0.0:
+    elif lead.status and (self.dynamicTFollowDecel > 0.0 or self.dynamicTFollowAccel > 0.0):
       # lead.jLead < 0 : 앞차가 감속 방향으로 변함 -> 차간거리 증가
       # lead.jLead > 0 : 앞차가 가속 방향으로 변함 -> 차간거리 감소
-      t_follow += np.interp(lead.jLead, [-3.0, -0.5, 0.5, 2.0], [1.0, 0.0, 0.0, -1.0]) * self.dynamicTFollow
+      decel_factor = np.interp(lead.jLead, [-3.0, -0.5], [1.0, 0.0])
+      accel_factor = np.interp(lead.jLead, [0.5, 2.0], [0.0, -1.0])
+      t_follow += decel_factor * self.dynamicTFollowDecel + accel_factor * self.dynamicTFollowAccel
 
       # 앞차가 풀어주는 상황에서는 jerk factor 약간 낮춰서 더 민첩하게
       if lead.jLead > 0.2:
