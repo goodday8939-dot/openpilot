@@ -40,7 +40,12 @@ V_EGO_COST = 0.
 A_EGO_COST = 0.
 J_EGO_COST = 5.0
 A_CHANGE_COST = 200.
-A_CHANGE_COST_STARTING = 10. #30.
+A_CHANGE_COST_STARTING = 150. #10. -- EV launch feels too punchy with a low starting cost, raised toward steady-state 200 for a gradual ramp
+# 앞차 추종/크루즈 재개로 lead-accel response(추종 가속 반응)가 새로 켜질 때,
+# a_change_cost/jerk_cost를 한 프레임만에 확 낮추지 않고 이 시간(초) 동안
+# 부드럽게 낮춰서 "훅" 튀는 느낌을 없앰. 다 낮아진 뒤(최종 추종 속도/세기)는
+# 기존과 동일하게 유지됨 - 초반 체감만 바뀜.
+LEAD_ACCEL_RESPONSE_RAMP_TIME_S = 0.4
 DANGER_ZONE_COST = 100.
 CRASH_DISTANCE = .25
 LEAD_DANGER_FACTOR = 0.8 # 0.75
@@ -250,6 +255,7 @@ class LongitudinalMpc:
     self.jerk_cost_factor = 1.0
     self.lead_accel_response_active = False
     self.lead_accel_response_level = 0
+    self.lead_accel_response_ramp = 0.0
 
     self.reset()
     self.source = SOURCES[2]
@@ -285,6 +291,7 @@ class LongitudinalMpc:
     self.solution_status = 0
     self.lead_accel_response_active = False
     self.lead_accel_response_level = 0
+    self.lead_accel_response_ramp = 0.0
     # timers
     self.solve_time = 0.0
     self.time_qp_solution = 0.0
@@ -408,7 +415,7 @@ class LongitudinalMpc:
       and tf_lead.status
       and tf_lead.radar
       and tf_lead.radarTrackId >= 0
-      and tf_lead.vRel >= 0.0
+      and tf_lead.vRel >= -1.5  # loosened further for city stop-and-go
     )
     t_follow = carrot.get_T_FOLLOW(
       personality, v_ego, a_ego,
@@ -535,13 +542,28 @@ class LongitudinalMpc:
     )
     self.lead_accel_response_active = response_request.active
     self.lead_accel_response_level = response_request.level if response_request.active else 0
+
+    # response_request의 a_change_cost_factor/jerk_cost_factor를 켜지는 순간 바로
+    # 적용하면 그 프레임에 가속도가 확 튀는("훅") 느낌을 준다. 활성화된 순간부터
+    # LEAD_ACCEL_RESPONSE_RAMP_TIME_S 동안 1.0(평소 수준)에서 목표값까지 서서히
+    # 낮춰서, 초반 체감만 부드럽게 만들고 다 낮아진 뒤의 최종 추종 속도/세기는
+    # 그대로 유지한다. 비활성화되면 다음 활성화 때 다시 부드럽게 시작하도록 즉시 0으로.
+    if response_request.active and LEAD_ACCEL_RESPONSE_RAMP_TIME_S > 0.0:
+      ramp_step = self.dt / LEAD_ACCEL_RESPONSE_RAMP_TIME_S
+      self.lead_accel_response_ramp = min(1.0, self.lead_accel_response_ramp + ramp_step)
+    else:
+      self.lead_accel_response_ramp = 0.0
+    ramp = self.lead_accel_response_ramp
+    ramped_a_change_cost_factor = 1.0 + (response_request.a_change_cost_factor - 1.0) * ramp
+    ramped_jerk_cost_factor = 1.0 + (response_request.jerk_cost_factor - 1.0) * ramp
+
     self.set_weights(
       prev_accel_constraint,
       personality=personality,
       jerk_factor=jerk_factor,
       a_change_cost_starting=a_change_cost_starting,
-      a_change_cost_factor=response_request.a_change_cost_factor,
-      jerk_cost_factor=response_request.jerk_cost_factor,
+      a_change_cost_factor=ramped_a_change_cost_factor,
+      jerk_cost_factor=ramped_jerk_cost_factor,
     )
 
     self.yref[:,1] = x
