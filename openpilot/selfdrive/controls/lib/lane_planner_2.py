@@ -68,6 +68,7 @@ class LanePlanner:
     self.lane_width_left_filtered = FirstOrderFilter(1.0, 1.0, DT_MDL)
     self.lane_width_right_filtered = FirstOrderFilter(1.0, 1.0, DT_MDL)
     self.lane_offset_filtered = FirstOrderFilter(0.0, 2.0, DT_MDL)
+    self.avoid_offset_filtered_x = 0.0  # 정차물체 회피 오프셋 (빠르게 진입, 천천히 복귀)
 
     self.lanefull_mode = False
     self.d_prob_count = 0
@@ -172,7 +173,9 @@ class LanePlanner:
     offset_curve = self.adjustCurveOffset * _fade_scale * _strong_scale * np.sign(curve_speed)
 
     offset_lane = 0.0
-    if self.lane_width_left_filtered.x > 2.2 and self.lane_width_right_filtered.x > 2.2: #양쪽에 차로가 여유 있는경우
+    if self.lane_width > 3.3: #내 차로 자체가 너무 넓은 경우 - 우측통행이므로 중앙선쪽(왼쪽) 대신 갓길쪽(오른쪽)으로 붙음
+      offset_lane = self.adjustLaneOffset
+    elif self.lane_width_left_filtered.x > 2.2 and self.lane_width_right_filtered.x > 2.2: #양쪽에 차로가 여유 있는경우
       offset_lane = 0.0
     elif self.lane_width_left_filtered.x < 2.0 and self.lane_width_right_filtered.x < 2.0: #양쪽에 차로가 여유 없는경우
       offset_lane = 0.0
@@ -201,22 +204,16 @@ class LanePlanner:
     else:
       lane_path_y = (l_prob * path_from_left_lane + r_prob * path_from_right_lane) / (l_prob + r_prob + 0.0001)
 
-    use_laneless_center_adjust = False
-    if use_laneless_center_adjust:
-      ## 0.5초 앞의 중심을 보도록함.
-      lane_path_y_center = np.interp(0.5, path_t, lane_path_y)
-      path_xyz_y_center = np.interp(0.5, path_t, path_xyz[:,1])
-      #lane_path_y_center = lane_path_y[0]
-      #path_xyz_y_center = path_xyz[:,1][0]
-      diff_center = (lane_path_y_center - path_xyz_y_center) if not self.lanefull_mode else 0.0
-    else:
-      diff_center = 0.0
+    ## 0.5초 앞의 중심을 보도록함. (정차물체 회피 감지용으로 항상 계산)
+    lane_path_y_center = np.interp(0.5, path_t, lane_path_y)
+    path_xyz_y_center = np.interp(0.5, path_t, path_xyz[:,1])
+    diff_center = (lane_path_y_center - path_xyz_y_center) if not self.lanefull_mode else 0.0
     #print("center = {:.2f}={:.2f}-{:.2f}, lanefull={}".format(diff_center, lane_path_y_center, path_xyz_y_center, self.lanefull_mode))
     #diff_center = lane_path_y[5] - path_xyz[:,1][5] if not self.lanefull_mode else 0.0
     if offset_curve * offset_lane < 0:
-      offset_total = np.clip(offset_curve + offset_lane + diff_center, - ADJUST_OFFSET_LIMIT, ADJUST_OFFSET_LIMIT)
+      offset_total = np.clip(offset_curve + offset_lane, - ADJUST_OFFSET_LIMIT, ADJUST_OFFSET_LIMIT)
     else:
-      offset_total = np.clip(max(offset_curve, offset_lane, key=abs) + diff_center, - ADJUST_OFFSET_LIMIT, ADJUST_OFFSET_LIMIT)
+      offset_total = np.clip(max(offset_curve, offset_lane, key=abs), - ADJUST_OFFSET_LIMIT, ADJUST_OFFSET_LIMIT)
 
     ## self.d_prob = 0 if lane_changing
     self.d_prob *= self.lane_change_multiplier  ## 차선변경중에는 꺼버림.
@@ -225,6 +222,17 @@ class LanePlanner:
       pass
     else:
       self.lane_offset_filtered.update(np.interp(self.d_prob, [0, 0.3], [0, offset_total]))
+
+    ## 정차물체 회피 오프셋: 모델이 이미 만든 회피량(diff_center)을 증폭 + 비대칭 필터
+    ## (진입은 빠르게/복귀는 천천히) - 웹당근(설정)에서 조정 가능
+    avoid_boost = float(self.params.get_int("AvoidOffsetBoostPct")) * 0.01
+    avoid_attack_tau = float(self.params.get_int("AvoidAttackTauCs")) * 0.01
+    avoid_release_tau = float(self.params.get_int("AvoidReleaseTauCs")) * 0.01
+    avoid_gate = np.interp(self.d_prob, [0, 0.3], [0, 1])
+    avoid_target = np.clip(diff_center * avoid_boost, -ADJUST_OFFSET_LIMIT, ADJUST_OFFSET_LIMIT) * avoid_gate
+    avoid_tau = avoid_attack_tau if abs(avoid_target) > abs(self.avoid_offset_filtered_x) else avoid_release_tau
+    avoid_alpha = DT_MDL / (avoid_tau + DT_MDL)
+    self.avoid_offset_filtered_x = (1.0 - avoid_alpha) * self.avoid_offset_filtered_x + avoid_alpha * avoid_target
 
     ## laneless at lowspeed
     self.d_prob *= np.interp(v_ego*3.6, [5., 10.], [0.0, 1.0])
@@ -252,9 +260,9 @@ class LanePlanner:
           path_xyz[:,1] = self.d_prob * lane_path_y_interp + (1.0 - self.d_prob) * path_xyz[:,1]
 
 
-    path_xyz[:, 1] += (CAMERA_OFFSET + self.lane_offset_filtered.x)
+    path_xyz[:, 1] += (CAMERA_OFFSET + self.lane_offset_filtered.x + self.avoid_offset_filtered_x)
 
-    self.offset_total = self.lane_offset_filtered.x
+    self.offset_total = self.lane_offset_filtered.x + self.avoid_offset_filtered_x
 
     return path_xyz, laneline_active
 

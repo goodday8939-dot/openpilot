@@ -110,6 +110,31 @@ async def api_param_set(request: web.Request) -> web.Response:
   except Exception:
     pass
 
+  # Speed-zone chains that must stay strictly increasing (each at least
+  # ORDERED_CHAIN_GAP apart) regardless of which one the user edits. Purely
+  # additive: any name not listed here is completely unaffected.
+  ORDERED_CHAINS = [
+    ["FixedGapZone1Kph", "FixedGapZone2Kph", "FixedGapZone3Kph", "FixedGapZone4Kph"],
+  ]
+  ORDERED_CHAIN_GAP = 5
+  try:
+    for chain in ORDERED_CHAINS:
+      if name in chain:
+        idx = chain.index(name)
+        neighbors = [n for n in (chain[idx - 1] if idx > 0 else None, chain[idx + 1] if idx + 1 < len(chain) else None) if n]
+        if neighbors:
+          current = get_param_values(neighbors, {})
+          value = float(value)
+          if idx > 0 and chain[idx - 1] in current:
+            value = max(value, float(current[chain[idx - 1]]) + ORDERED_CHAIN_GAP)
+          if idx + 1 < len(chain) and chain[idx + 1] in current:
+            value = min(value, float(current[chain[idx + 1]]) - ORDERED_CHAIN_GAP)
+          value = clamp_numeric(value, p)
+          value = int(round(value))
+        break
+  except Exception:
+    pass
+
   try:
     set_param_value(name, value, p)
   except Exception as e:

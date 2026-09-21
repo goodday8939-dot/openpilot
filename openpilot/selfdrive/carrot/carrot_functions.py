@@ -229,6 +229,10 @@ class CarrotPlanner:
       self.fixedGapDelta2 = self.params.get_int("FixedGapDelta2Cm") / 100.
       self.fixedGapDelta3 = self.params.get_int("FixedGapDelta3Cm") / 100.
       self.fixedGapDelta4 = self.params.get_int("FixedGapDelta4Cm") / 100.
+      self.fixedGapZone1 = float(self.params.get_int("FixedGapZone1Kph"))
+      self.fixedGapZone2 = float(self.params.get_int("FixedGapZone2Kph"))
+      self.fixedGapZone3 = float(self.params.get_int("FixedGapZone3Kph"))
+      self.fixedGapZone4 = float(self.params.get_int("FixedGapZone4Kph"))
       _lead_accel_push_s = self.params.get_int("LeadAccelPushSeconds") / 100.
       _t4 = longitudinal_preview.LEAD_ACCEL_RESPONSE_TUNING[4]
       longitudinal_preview.LEAD_ACCEL_RESPONSE_TUNING[4] = longitudinal_preview.LeadAccelResponseTuning(
@@ -355,7 +359,7 @@ class CarrotPlanner:
     # whether the lead is accelerating or holding a steady speed -- this is
     # what keeps low-speed traffic tight enough that other cars stop cutting
     # in, instead of reverting to a looser gap the moment the lead settles.
-    fixed_gap_zone = lead_status and v_kph_now < FIXED_GAP_ZONE4_KPH
+    fixed_gap_zone = lead_status and v_kph_now < self.fixedGapZone4
     self._fixed_gap_active = fixed_gap_zone  # let dynamic_t_follow() know to stand down
     force_tf1_target = (
       not fixed_gap_zone
@@ -366,11 +370,11 @@ class CarrotPlanner:
       and self.leadAccelResponse >= LEAD_ACCEL_TF1_FORCE_MIN
     )
     if fixed_gap_zone:
-      if v_kph_now < FIXED_GAP_ZONE1_KPH:
+      if v_kph_now < self.fixedGapZone1:
         target_m = self.stop_distance + self.fixedGapDelta1
-      elif v_kph_now < FIXED_GAP_ZONE2_KPH:
+      elif v_kph_now < self.fixedGapZone2:
         target_m = self.stop_distance + self.fixedGapDelta2
-      elif v_kph_now < FIXED_GAP_ZONE3_KPH:
+      elif v_kph_now < self.fixedGapZone3:
         target_m = self.stop_distance + self.fixedGapDelta3
       else:
         target_m = self.stop_distance + self.fixedGapDelta4
@@ -453,7 +457,7 @@ class CarrotPlanner:
       # lead.jLead > 0 : 앞차가 가속 방향으로 변함 -> 차간거리 감소
       decel_factor = np.interp(lead.jLead, [-3.0, -0.5], [1.0, 0.0])
       accel_factor = np.interp(lead.jLead, [0.5, 2.0], [0.0, -1.0])
-      t_follow += decel_factor * self.dynamicTFollowDecel + accel_factor * self.dynamicTFollowAccel
+      t_follow += decel_factor * self.dynamicTFollowDecel * 2.0 + accel_factor * self.dynamicTFollowAccel
 
       # 앞차가 풀어주는 상황에서는 jerk factor 약간 낮춰서 더 민첩하게
       if lead.jLead > 0.2:

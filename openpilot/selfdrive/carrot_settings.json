@@ -251,9 +251,18 @@
                 "TurnSpeedControlMode",
                 "MapTurnSpeedFactor",
                 "ModelTurnSpeedFactor",
-                "ApplyModelSpeed",
-                "AdjustCurveMaxBoost",
-                "AdjustOffsetLimitCm"
+                "ApplyModelSpeed"
+              ]
+            },
+            {
+              "id": "SPEED_AVOID",
+              "ko": "정차물체 회피",
+              "en": "Stationary Avoidance",
+              "zh": "静止物体避让",
+              "params": [
+                "AvoidOffsetBoostPct",
+                "AvoidAttackTauCs",
+                "AvoidReleaseTauCs"
               ]
             },
             {
@@ -316,8 +325,7 @@
                 "StopDistanceCarrot",
                 "StoppingAccel",
                 "VEgoStopping",
-                "AChangeCostStarting",
-                "ComfortBrakeCarrot"
+                "AChangeCostStarting"
               ]
             },
             {
@@ -345,14 +353,7 @@
                 "LeadAccelResponse",
                 "DynamicTFollowLC",
                 "EnableSpeedTF",
-                "TFollowDecelBoost",
-                "LeadAccelPushSeconds",
-                "DynamicTFollowDecel",
-                "DynamicTFollowAccel",
-                "FixedGapDelta1Cm",
-                "FixedGapDelta2Cm",
-                "FixedGapDelta3Cm",
-                "FixedGapDelta4Cm"
+                "TFollowDecelBoost"
               ]
             },
             {
@@ -364,6 +365,64 @@
                 "CruiseEcoControl",
                 "CarrotCruiseDecel",
                 "CarrotCruiseAtcDecel"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "MY_MENU",
+          "ko": "마이메뉴",
+          "en": "My Menu",
+          "zh": "我的菜单",
+          "groups": [
+            {
+              "id": "MY_MENU_STEER",
+              "ko": "차량 조향",
+              "en": "Steering",
+              "zh": "转向",
+              "params": [
+                "AdjustCurveOffset",
+                "AdjustCurveMaxBoost",
+                "AdjustOffsetLimitCm"
+              ]
+            },
+            {
+              "id": "MY_MENU_CRUISE",
+              "ko": "크루즈",
+              "en": "Cruise",
+              "zh": "巡航",
+              "params": [
+                "ComfortBrakeCarrot",
+                "LeadAccelPushSeconds",
+                "DynamicTFollowDecel",
+                "DynamicTFollowAccel"
+              ]
+            },
+            {
+              "id": "MY_MENU_GAP",
+              "ko": "속도구간·추종거리",
+              "en": "Speed Zones & Follow Gap",
+              "zh": "速度区间与跟车距离",
+              "params": [
+                "FixedGapZone1Kph",
+                "FixedGapDelta1Cm",
+                "FixedGapZone2Kph",
+                "FixedGapDelta2Cm",
+                "FixedGapZone3Kph",
+                "FixedGapDelta3Cm",
+                "FixedGapZone4Kph",
+                "FixedGapDelta4Cm"
+              ]
+            },
+            {
+              "id": "MY_MENU_AVOID",
+              "ko": "정차물체 회피",
+              "en": "Stationary Avoidance",
+              "zh": "静止物体避让",
+              "params": [
+                "AvoidOffsetBoostPct",
+                "AvoidAttackTauCs",
+                "AvoidReleaseTauCs"
               ]
             }
           ]
@@ -2353,7 +2412,7 @@
       "group": "조향일반",
       "name": "AdjustCurveOffset",
       "title": "조향일반: 커브구간 조절옵셋 (0)cm",
-      "descr": "레인모드와 무관하게 커브 구간에서 도로경계쪽/커브안쪽으로 보정합니다.",
+      "descr": "레인모드와 무관하게 커브 구간에서 보정합니다. 값을 올릴수록 커브 바깥쪽(도로경계쪽)으로 더 밀려서 돕니다.",
       "egroup": "LANE",
       "etitle": "Steering: AdjustCurveOffset (0)cm",
       "edescr": "Corrects toward the road edge/inside of the curve, independent of lane mode",
@@ -3769,16 +3828,132 @@
       "display_unit": "distanceCm"
     },
     {
+      "group": "정차물체 회피",
+      "name": "AvoidOffsetBoostPct",
+      "title": "회피: 회피량 증폭 x0.01 (160)",
+      "descr": "정차된 차량 등을 지나갈 때, 모델이 스스로 만들어내는 회피 오프셋을 얼마나 증폭할지 정합니다. 100=증폭 없음(그대로), 160=1.6배로 더 확실하게 벌어짐. 값을 올릴수록 더 크게 옆으로 이동합니다.",
+      "egroup": "AVOID",
+      "etitle": "Avoid: Offset Boost x0.01 (160)",
+      "edescr": "How much to amplify the avoidance offset the model already produces when passing a stationary vehicle. 100=no boost, 160=1.6x more decisive. Higher values shift further to the side.",
+      "cgroup": "静止物体避让",
+      "ctitle": "避让: 偏移放大 x0.01 (160)",
+      "cdescr": "设置经过静止车辆等物体时，模型自身产生的避让偏移放大程度。100=不放大，160=放大1.6倍更明显。数值越高侧移越大。",
+      "min": 100,
+      "max": 300,
+      "default": 160,
+      "unit": 10
+    },
+    {
+      "group": "정차물체 회피",
+      "name": "AvoidAttackTauCs",
+      "title": "회피: 진입 반응속도 x0.01초 (40)",
+      "descr": "정차물체를 피하기 시작할 때 얼마나 빠르게 반응할지 정합니다. 값이 작을수록 더 즉각적으로(급하게) 피하고, 값이 크면 서서히 피합니다.",
+      "egroup": "AVOID",
+      "etitle": "Avoid: Attack Time x0.01s (40)",
+      "edescr": "How quickly the avoidance kicks in when a stationary object is first detected. Lower = more immediate/abrupt, higher = more gradual.",
+      "cgroup": "静止物体避让",
+      "ctitle": "避让: 进入反应时间 x0.01秒 (40)",
+      "cdescr": "设置开始避让静止物体时的反应速度。数值越小反应越即时（越急），数值越大越缓慢。",
+      "min": 10,
+      "max": 150,
+      "default": 40,
+      "unit": 5
+    },
+    {
+      "group": "정차물체 회피",
+      "name": "AvoidReleaseTauCs",
+      "title": "회피: 복귀 시간 x0.01초 (350)",
+      "descr": "정차물체를 다 지나간 뒤 원래 차선 중앙으로 얼마나 천천히 돌아올지 정합니다. 값이 클수록 더 오래 벌어진 상태를 유지하다가 천천히 복귀합니다.",
+      "egroup": "AVOID",
+      "etitle": "Avoid: Release Time x0.01s (350)",
+      "edescr": "How slowly the car returns to lane center after passing the stationary object. Higher = stays shifted longer before easing back.",
+      "cgroup": "静止物体避让",
+      "ctitle": "避让: 恢复时间 x0.01秒 (350)",
+      "cdescr": "设置经过静止物体后恢复到车道中心的缓慢程度。数值越大，保持偏移状态越久才慢慢恢复。",
+      "min": 100,
+      "max": 800,
+      "default": 350,
+      "unit": 25
+    },
+    {
+      "group": "차량간격",
+      "name": "FixedGapZone1Kph",
+      "title": "속도구간1 상한 (35)km/h",
+      "descr": "고정 차간거리 1단계가 적용되는 속도 상한입니다. 이 속도 미만에서는 추종거리(구간1 미만) 값이 적용됩니다. 속도구간2보다 낮게 설정하세요.",
+      "egroup": "FDIST",
+      "etitle": "Speed Zone 1 upper bound (35)km/h",
+      "edescr": "Upper speed bound for fixed-gap Zone 1. Below this speed, the Zone1 follow-distance value applies. Keep lower than Zone 2.",
+      "cgroup": "跟车距离",
+      "ctitle": "速度区间1上限 (35)km/h",
+      "cdescr": "固定车距第1档适用的速度上限。低于此速度时应用区间1的跟车距离值。请设置为低于速度区间2。",
+      "min": 0,
+      "max": 150,
+      "default": 35,
+      "unit": 5,
+      "display_unit": "speedKph"
+    },
+    {
+      "group": "차량간격",
+      "name": "FixedGapZone2Kph",
+      "title": "속도구간2 상한 (75)km/h",
+      "descr": "고정 차간거리 2단계가 적용되는 속도 상한입니다. 속도구간1과 속도구간3 사이 값으로 설정하세요.",
+      "egroup": "FDIST",
+      "etitle": "Speed Zone 2 upper bound (75)km/h",
+      "edescr": "Upper speed bound for fixed-gap Zone 2. Set between Zone 1 and Zone 3.",
+      "cgroup": "跟车距离",
+      "ctitle": "速度区间2上限 (75)km/h",
+      "cdescr": "固定车距第2档适用的速度上限。请设置在速度区间1与区间3之间。",
+      "min": 0,
+      "max": 150,
+      "default": 75,
+      "unit": 5,
+      "display_unit": "speedKph"
+    },
+    {
+      "group": "차량간격",
+      "name": "FixedGapZone3Kph",
+      "title": "속도구간3 상한 (95)km/h",
+      "descr": "고정 차간거리 3단계가 적용되는 속도 상한입니다. 속도구간2와 속도구간4 사이 값으로 설정하세요.",
+      "egroup": "FDIST",
+      "etitle": "Speed Zone 3 upper bound (95)km/h",
+      "edescr": "Upper speed bound for fixed-gap Zone 3. Set between Zone 2 and Zone 4.",
+      "cgroup": "跟车距离",
+      "ctitle": "速度区间3上限 (95)km/h",
+      "cdescr": "固定车距第3档适用的速度上限。请设置在速度区间2与区间4之间。",
+      "min": 0,
+      "max": 200,
+      "default": 95,
+      "unit": 5,
+      "display_unit": "speedKph"
+    },
+    {
+      "group": "차량간격",
+      "name": "FixedGapZone4Kph",
+      "title": "속도구간4 상한 (115)km/h",
+      "descr": "이 속도를 넘으면 고정 차간거리 로직 자체가 꺼지고 TFollowGap(시간간격) 방식으로 전환됩니다. 속도구간3보다 높게 설정하세요.",
+      "egroup": "FDIST",
+      "etitle": "Speed Zone 4 upper bound (115)km/h",
+      "edescr": "Above this speed, fixed-gap logic turns off and the TFollowGap time-gap system takes over. Keep higher than Zone 3.",
+      "cgroup": "跟车距离",
+      "ctitle": "速度区间4上限 (115)km/h",
+      "cdescr": "超过此速度后固定车距逻辑关闭，改用TFollowGap时间间隔方式。请设置为高于速度区间3。",
+      "min": 0,
+      "max": 200,
+      "default": 115,
+      "unit": 5,
+      "display_unit": "speedKph"
+    },
+    {
       "group": "차량간격",
       "name": "FixedGapDelta1Cm",
-      "title": "추종거리(45↓): 정지거리+(50)cm",
-      "descr": "45km/h 이하 구간에서 정지거리 위에 추가로 더할 거리입니다. 정지거리를 바꿔도 이 추가분은 그대로 유지됩니다.",
+      "title": "추종거리(구간1 미만): 정지거리+(50)cm",
+      "descr": "속도구간1 미만 구간에서 정지거리 위에 추가로 더할 거리입니다. 정지거리를 바꿔도 이 추가분은 그대로 유지됩니다.",
       "egroup": "FDIST",
-      "etitle": "Follow Gap Zone1(<45kph): stop_distance+(50)cm",
-      "edescr": "Extra distance added on top of stop distance below 45km/h. Stays constant even if stop distance changes.",
+      "etitle": "Follow Gap Zone1 (below Zone1 speed): stop_distance+(50)cm",
+      "edescr": "Extra distance added on top of stop distance below the Zone1 speed threshold. Stays constant even if stop distance changes.",
       "cgroup": "跟车距离",
-      "ctitle": "跟随车距(45↓): 停车距离+(50)cm",
-      "cdescr": "45km/h以下时在停车距离基础上额外增加的距离。停车距离改变时此增量保持不变。",
+      "ctitle": "跟随车距(区间1以下): 停车距离+(50)cm",
+      "cdescr": "速度区间1以下时在停车距离基础上额外增加的距离。停车距离改变时此增量保持不变。",
       "min": 0,
       "max": 300,
       "default": 50,
@@ -3788,14 +3963,14 @@
     {
       "group": "차량간격",
       "name": "FixedGapDelta2Cm",
-      "title": "추종거리(60↓): 정지거리+(100)cm",
-      "descr": "60km/h 이하 구간에서 정지거리 위에 추가로 더할 거리입니다.",
+      "title": "추종거리(구간2 미만): 정지거리+(100)cm",
+      "descr": "속도구간2 미만 구간에서 정지거리 위에 추가로 더할 거리입니다.",
       "egroup": "FDIST",
-      "etitle": "Follow Gap Zone2(<60kph): stop_distance+(100)cm",
-      "edescr": "Extra distance added on top of stop distance below 60km/h.",
+      "etitle": "Follow Gap Zone2 (below Zone2 speed): stop_distance+(100)cm",
+      "edescr": "Extra distance added on top of stop distance below the Zone2 speed threshold.",
       "cgroup": "跟车距离",
-      "ctitle": "跟随车距(60↓): 停车距离+(100)cm",
-      "cdescr": "60km/h以下时在停车距离基础上额外增加的距离。",
+      "ctitle": "跟随车距(区间2以下): 停车距离+(100)cm",
+      "cdescr": "速度区间2以下时在停车距离基础上额外增加的距离。",
       "min": 0,
       "max": 300,
       "default": 100,
@@ -3805,14 +3980,14 @@
     {
       "group": "차량간격",
       "name": "FixedGapDelta3Cm",
-      "title": "추종거리(80↓): 정지거리+(150)cm",
-      "descr": "80km/h 이하 구간에서 정지거리 위에 추가로 더할 거리입니다.",
+      "title": "추종거리(구간3 미만): 정지거리+(150)cm",
+      "descr": "속도구간3 미만 구간에서 정지거리 위에 추가로 더할 거리입니다.",
       "egroup": "FDIST",
-      "etitle": "Follow Gap Zone3(<80kph): stop_distance+(150)cm",
-      "edescr": "Extra distance added on top of stop distance below 80km/h.",
+      "etitle": "Follow Gap Zone3 (below Zone3 speed): stop_distance+(150)cm",
+      "edescr": "Extra distance added on top of stop distance below the Zone3 speed threshold.",
       "cgroup": "跟车距离",
-      "ctitle": "跟随车距(80↓): 停车距离+(150)cm",
-      "cdescr": "80km/h以下时在停车距离基础上额外增加的距离。",
+      "ctitle": "跟随车距(区间3以下): 停车距离+(150)cm",
+      "cdescr": "速度区间3以下时在停车距离基础上额外增加的距离。",
       "min": 0,
       "max": 300,
       "default": 150,
@@ -3822,14 +3997,14 @@
     {
       "group": "차량간격",
       "name": "FixedGapDelta4Cm",
-      "title": "추종거리(100↓): 정지거리+(250)cm",
-      "descr": "100km/h 이하 구간에서 정지거리 위에 추가로 더할 거리입니다. 100km/h를 넘으면 이 고정거리 로직 자체가 꺼지고 TFollowGap 시간간격 방식으로 전환됩니다.",
+      "title": "추종거리(구간4 미만): 정지거리+(250)cm",
+      "descr": "속도구간4 미만 구간에서 정지거리 위에 추가로 더할 거리입니다. 속도구간4를 넘으면 이 고정거리 로직 자체가 꺼지고 TFollowGap 시간간격 방식으로 전환됩니다.",
       "egroup": "FDIST",
-      "etitle": "Follow Gap Zone4(<100kph): stop_distance+(250)cm",
-      "edescr": "Extra distance added on top of stop distance below 100km/h. Above 100km/h this fixed-gap logic turns off and the TFollowGap time-gap system takes over.",
+      "etitle": "Follow Gap Zone4 (below Zone4 speed): stop_distance+(250)cm",
+      "edescr": "Extra distance added on top of stop distance below the Zone4 speed threshold. Above that speed this fixed-gap logic turns off and the TFollowGap time-gap system takes over.",
       "cgroup": "跟车距离",
-      "ctitle": "跟随车距(100↓): 停车距离+(250)cm",
-      "cdescr": "100km/h以下时在停车距离基础上额外增加的距离。超过100km/h后此固定车距逻辑关闭，改用TFollowGap时间间隔方式。",
+      "ctitle": "跟随车距(区间4以下): 停车距离+(250)cm",
+      "cdescr": "速度区间4以下时在停车距离基础上额外增加的距离。超过该速度后此固定车距逻辑关闭，改用TFollowGap时间间隔方式。",
       "min": 0,
       "max": 300,
       "default": 250,
