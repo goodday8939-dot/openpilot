@@ -1,3 +1,6 @@
+import os
+import csv
+import time
 from openpilot.cereal import log
 from openpilot.common.constants import CV
 from openpilot.common.realtime import DT_MDL
@@ -69,6 +72,23 @@ class DesireHelper:
     # externally readable flags
     self.lane_change_available_left = False
     self.lane_change_available_right = False
+
+    # blocked lane-change debug logger
+    self._lc_log_path = "/data/lanechange_events.csv"
+    self._lc_log_last_write = 0.0
+    self._lc_log_min_interval = 0.5
+    if not os.path.exists(self._lc_log_path):
+      try:
+        with open(self._lc_log_path, "w", newline="") as f:
+          w = csv.writer(f)
+          w.writerow([
+            "time", "side", "v_kph", "maneuver_type", "blinker_state",
+            "lane_available", "edge_available", "lane_change_available_geom",
+            "side_object_detected", "bsd_hold_counter", "lane_change_available",
+            "lane_change_state", "desireLog",
+          ])
+      except Exception:
+        pass
 
   # ─────────────────────────────────────────────
   # params/model
@@ -215,6 +235,36 @@ class DesireHelper:
   def _get_selected_side(self, blinker_state: int) -> SideState:
     return self.left if blinker_state == BLINKER_LEFT else self.right
 
+  def _log_blocked_lane_change(self, carstate, desire_enabled, side, blinker_state):
+    if not desire_enabled or side is None:
+      return
+    if side.lane_change_available:
+      return  # 정상적으로 가능한 상태면 기록 안 함 - 막힌 경우만 관심 있음
+    now = time.monotonic()
+    if now - self._lc_log_last_write < self._lc_log_min_interval:
+      return
+    self._lc_log_last_write = now
+    try:
+      with open(self._lc_log_path, "a", newline="") as f:
+        w = csv.writer(f)
+        w.writerow([
+          f"{time.time():.1f}",
+          side.name,
+          f"{carstate.vEgo * 3.6:.1f}",
+          self.maneuver_type,
+          blinker_state,
+          side.lane_available,
+          side.edge_available,
+          side.lane_change_available_geom,
+          side.side_object_detected,
+          side.bsd_hold_counter,
+          side.lane_change_available,
+          self.lane_change_state,
+          self.desireLog,
+        ])
+    except Exception:
+      pass
+
   @staticmethod
   def _is_last_lane(side: SideState) -> bool:
     return side.lane_exist_count.counter <= 0 and not side.lane_change_available_geom
@@ -275,6 +325,8 @@ class DesireHelper:
       side is not None and
       side.lane_line_info_mod not in (0, 5)
     )
+
+    self._log_blocked_lane_change(carstate, desire_enabled, side, blinker_state)
 
     # auto lane change trigger (기존 로직 유지하되 side 기반)
     auto_lane_change_trigger = False
