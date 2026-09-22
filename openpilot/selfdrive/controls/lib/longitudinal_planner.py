@@ -29,7 +29,7 @@ from openpilot.common.params import Params
 
 
 LON_MPC_STEP = 0.2  # first step is 0.2s
-A_CRUISE_MIN = -2.0 #-1.2
+A_CRUISE_MIN = -2.3 #-1.2
 A_CRUISE_MAX_VALS = [1.6, 1.2, 0.8, 0.6]
 A_CRUISE_MAX_BP = [0., 10.0, 25., 40.]
 CONTROL_N_T_IDX = ModelConstants.T_IDXS[:CONTROL_N]
@@ -115,6 +115,18 @@ class LongitudinalPlanner:
     self.lead_track_ids = [-1, -1]
     self.lead_track_frames = [0, 0]
 
+    # Fix 2: jerk_factor를 그대로 쓰지 않고 살짝 스무딩해서, 모드 전환(고정거리
+    # on/off, 성향 변경, 앞차 jLead 반응 등) 시 값이 순간적으로 튀어서 가속도
+    # 명령이 훅 꺾이는(울컥거리는) 걸 줄인다. 목표값 자체는 그대로 유지되고
+    # 도달 속도만 짧게(약 0.3초) 부드러워짐.
+    self.jerk_factor_filtered = 1.0
+
+    # Fix 3: standstill 플래그가 정지 직전 0 근처 속도에서 자잘하게 튈 때마다
+    # prev_accel_constraint이 매 프레임 켜졌다꺼졌다 하며 가속도 명령에 잔진동을
+    # 주는 걸 막기 위한 디바운스 카운터.
+    self.standstill_debounced = False
+    self.standstill_count = 0
+
     self.v_desired_trajectory = np.zeros(CONTROL_N)
     self.a_desired_trajectory = np.zeros(CONTROL_N)
     self.j_desired_trajectory = np.zeros(CONTROL_N)
@@ -191,8 +203,18 @@ class LongitudinalPlanner:
     # PCM cruise speed may be updated a few cycles later, check if initialized
     reset_state = reset_state or not v_cruise_initialized or carrot.soft_hold_active
 
+    # Fix 3: standstill 디바운스 (정지 직전 속도 진동으로 인한 잔진동 방지)
+    STANDSTILL_DEBOUNCE_FRAMES = 5  # DT_MDL(0.05s) 기준 약 0.25초
+    if sm['carState'].standstill == self.standstill_debounced:
+      self.standstill_count = 0
+    else:
+      self.standstill_count += 1
+      if self.standstill_count >= STANDSTILL_DEBOUNCE_FRAMES:
+        self.standstill_debounced = sm['carState'].standstill
+        self.standstill_count = 0
+
     # No change cost when user is controlling the speed, or when standstill
-    prev_accel_constraint = not (reset_state or sm['carState'].standstill)
+    prev_accel_constraint = not (reset_state or self.standstill_debounced)
 
     if self.mpc.mode == 'acc':
       #accel_limits = [A_CRUISE_MIN, get_max_accel(v_ego)]
@@ -266,11 +288,18 @@ class LongitudinalPlanner:
     )
     self.mpc.set_accel_limits(accel_limits_turns[0], accel_limits_turns[1])
     self.mpc.set_cur_state(self.v_desired_filter.x, self.a_desired)
+
+    # Fix 2: jerk_factor 스무딩 (약 0.3초 시상수) - 목표값은 그대로,
+    # 도달 속도만 부드럽게 해서 모드 전환 시 순간적인 가속도 꺾임을 완화.
+    JERK_FACTOR_SMOOTH_TAU = 0.3
+    jf_alpha = self.dt / (JERK_FACTOR_SMOOTH_TAU + self.dt)
+    self.jerk_factor_filtered += jf_alpha * (carrot.jerk_factor_apply - self.jerk_factor_filtered)
+
     self.mpc.update(
       carrot, reset_state, sm['radarState'], v_cruise, x, v, a, j,
       personality=sm['selfdriveState'].personality,
       prev_accel_constraint=prev_accel_constraint,
-      jerk_factor=carrot.jerk_factor_apply,
+      jerk_factor=self.jerk_factor_filtered,
       a_change_cost_starting=carrot.aChangeCostStarting,
       lead_accel_response_enabled=lead_accel_response_enabled,
       cutout_relief_enabled=(

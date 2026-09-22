@@ -383,7 +383,8 @@
               "params": [
                 "AdjustCurveOffset",
                 "AdjustCurveMaxBoost",
-                "AdjustOffsetLimitCm"
+                "AdjustOffsetLimitCm",
+                "IntersectionTurnBoostPct"
               ]
             },
             {
@@ -3775,6 +3776,20 @@
       "max": 150,
       "default": 70,
       "unit": 5
+    },
+    {
+      "group": "커브·턴",
+      "name": "IntersectionTurnBoostPct",
+      "title": "교차로: 회전 부족 보정 x0.01 (0)",
+      "descr": "차선이 없는 저속 급회전(교차로 좌/우회전 모두)에서 경로가 바깥으로 밀리는 것을 보정합니다. 값을 올리면 회전 방향으로 더 확실하게 붙습니다. 기본값 0은 꺼짐.",
+      "egroup": "CURVE",
+      "etitle": "Intersection: Turn Shortage Boost x0.01 (0)",
+      "edescr": "Corrects path drifting outward during low-speed sharp turns with no lane lines (intersections). Higher = pulls more firmly toward the turn direction. Default 0 = off.",
+      "cgroup": "弯道与转弯",
+      "ctitle": "路口: 转弯不足补偿 x0.01 (0)",
+      "cdescr": "在无车道线的低速急转弯（路口转弯）时，修正路径向外偏移的问题。数值越大，转向修正越强。默认值0为关闭。",
+      "min": 0,
+      "max": 100
     },
     {
       "group": "차량간격",

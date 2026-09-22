@@ -3,7 +3,7 @@ import numpy as np
 from openpilot.cereal import log
 from openpilot.common.filter_simple import FirstOrderFilter
 from openpilot.common.realtime import DT_MDL
-# from openpilot.common.swaglog import cloudlog
+from openpilot.common.swaglog import cloudlog
 # from openpilot.common.logger import sLogger
 from openpilot.common.params import Params
 
@@ -45,6 +45,7 @@ class LanePlanner:
     self.rll_y = np.zeros((TRAJECTORY_SIZE,))
     self.le_y = np.zeros((TRAJECTORY_SIZE,))
     self.re_y = np.zeros((TRAJECTORY_SIZE,))
+    self.edge_valid = False
     #self.lane_width_estimate = FirstOrderFilter(3.2, 9.95, DT_MDL)
     self.lane_width_estimate = FirstOrderFilter(3.2, 3.0, DT_MDL)
     self.lane_width = 3.2
@@ -69,6 +70,7 @@ class LanePlanner:
     self.lane_width_right_filtered = FirstOrderFilter(1.0, 1.0, DT_MDL)
     self.lane_offset_filtered = FirstOrderFilter(0.0, 2.0, DT_MDL)
     self.avoid_offset_filtered_x = 0.0  # 정차물체 회피 오프셋 (빠르게 진입, 천천히 복귀)
+    self._avoid_log_frame = 0  # CARROT_AVOID 로그 스로틀용 프레임 카운터
 
     self.lanefull_mode = False
     self.d_prob_count = 0
@@ -94,9 +96,11 @@ class LanePlanner:
     if len(edges[0].t) == TRAJECTORY_SIZE:
       self.le_y = np.array(edges[0].y) + md.roadEdgeStds[0] * 0.4
       self.re_y = np.array(edges[1].y) - md.roadEdgeStds[1] * 0.4
+      self.edge_valid = True
     else:
       self.le_y = self.lll_y
       self.re_y = self.rll_y
+      self.edge_valid = False
 
     desire_state = md.meta.desireState
     if len(desire_state):
@@ -173,16 +177,22 @@ class LanePlanner:
     offset_curve = self.adjustCurveOffset * _fade_scale * _strong_scale * np.sign(curve_speed)
 
     offset_lane = 0.0
-    if self.lane_width > 3.3: #내 차로 자체가 너무 넓은 경우 - 우측통행이므로 중앙선쪽(왼쪽) 대신 갓길쪽(오른쪽)으로 붙음
-      offset_lane = self.adjustLaneOffset
-    elif self.lane_width_left_filtered.x > 2.2 and self.lane_width_right_filtered.x > 2.2: #양쪽에 차로가 여유 있는경우
-      offset_lane = 0.0
-    elif self.lane_width_left_filtered.x < 2.0 and self.lane_width_right_filtered.x < 2.0: #양쪽에 차로가 여유 없는경우
-      offset_lane = 0.0
-    elif self.lane_width_left_filtered.x > self.lane_width_right_filtered.x:
-      offset_lane = np.interp(self.lane_width, [2.5, 2.9], [0.0, self.adjustLaneOffset]) # 차선이 좁으면 안함..
-    else:
-      offset_lane = np.interp(self.lane_width, [2.5, 2.9], [0.0, -self.adjustLaneOffset]) # 차선이 좁으면 안함..
+    if self.d_prob > 0.3 and self.lane_width > 0:
+      if self.lane_width > 3.3: #내 차로 자체가 너무 넓은 경우 - 우측통행이므로 중앙선쪽(왼쪽) 대신 갓길쪽(오른쪽)으로 붙음
+        offset_lane = self.adjustLaneOffset
+      elif self.lane_width_left_filtered.x > 2.2 and self.lane_width_right_filtered.x > 2.2: #양쪽에 차로가 여유 있는경우
+        offset_lane = 0.0
+      elif self.lane_width_left_filtered.x < 2.0 and self.lane_width_right_filtered.x < 2.0: #양쪽에 차로가 여유 없는경우
+        offset_lane = 0.0
+      elif self.lane_width_left_filtered.x > self.lane_width_right_filtered.x:
+        offset_lane = np.interp(self.lane_width, [2.5, 2.9], [0.0, self.adjustLaneOffset]) # 차선이 좁으면 안함..
+      else:
+        offset_lane = np.interp(self.lane_width, [2.5, 2.9], [0.0, -self.adjustLaneOffset]) # 차선이 좁으면 안함..
+    elif self.edge_valid:
+      ## laneless: 도로 경계(연석 등) 기반 폭으로 갓길쪽 붙임 판단 - 근거리 점 평균 사용
+      edge_width = float(np.mean(self.re_y[0:5] - self.le_y[0:5]))
+      if 2.0 < edge_width < 8.0 and edge_width > 3.3:
+        offset_lane = self.adjustLaneOffset
 
     #select lane path
     # 차선이 좁아지면, 도로경계쪽에 있는 차선 위주로 따라가도록함.
@@ -221,18 +231,34 @@ class LanePlanner:
       #self.lane_offset_filtered.x = 0.0
       pass
     else:
-      self.lane_offset_filtered.update(np.interp(self.d_prob, [0, 0.3], [0, offset_total]))
+      if self.d_prob > 0.3:
+        _offset_gate = 1.0
+      elif self.edge_valid:
+        _offset_gate = 1.0
+      else:
+        _offset_gate = np.interp(self.d_prob, [0, 0.3], [0, 1])
+      self.lane_offset_filtered.update(_offset_gate * offset_total)
 
     ## 정차물체 회피 오프셋: 모델이 이미 만든 회피량(diff_center)을 증폭 + 비대칭 필터
     ## (진입은 빠르게/복귀는 천천히) - 웹당근(설정)에서 조정 가능
     avoid_boost = float(self.params.get_int("AvoidOffsetBoostPct")) * 0.01
     avoid_attack_tau = float(self.params.get_int("AvoidAttackTauCs")) * 0.01
     avoid_release_tau = float(self.params.get_int("AvoidReleaseTauCs")) * 0.01
-    avoid_gate = np.interp(self.d_prob, [0, 0.3], [0, 1])
+    avoid_gate = 1.0  # laneless(골목 등)에서도 회피 기능 유지
     avoid_target = np.clip(diff_center * avoid_boost, -ADJUST_OFFSET_LIMIT, ADJUST_OFFSET_LIMIT) * avoid_gate
     avoid_tau = avoid_attack_tau if abs(avoid_target) > abs(self.avoid_offset_filtered_x) else avoid_release_tau
     avoid_alpha = DT_MDL / (avoid_tau + DT_MDL)
     self.avoid_offset_filtered_x = (1.0 - avoid_alpha) * self.avoid_offset_filtered_x + avoid_alpha * avoid_target
+
+    # 회피기동이 실제로 유의미하게 작동 중일 때만(5cm 이상) 약 1초에 한 번
+    # swaglog에 남긴다 - 나중에 로그 분석 시 "CARROT_AVOID"로 grep해서
+    # 언제/얼마나 세게 회피했는지 확인 가능.
+    self._avoid_log_frame += 1
+    if abs(self.avoid_offset_filtered_x) > 0.05 and self._avoid_log_frame % 20 == 0:
+      cloudlog.info(
+        f"CARROT_AVOID v={v_ego*3.6:.1f}kph diff_center={diff_center:.3f} "
+        f"avoid_target={avoid_target:.3f} avoid_offset={self.avoid_offset_filtered_x:.3f}"
+      )
 
     ## laneless at lowspeed
     self.d_prob *= np.interp(v_ego*3.6, [5., 10.], [0.0, 1.0])
@@ -259,6 +285,15 @@ class LanePlanner:
           lane_path_y_interp = np.interp(path_t * (1.0 + adjustLaneTime), self.ll_t[safe_idxs], lane_path_y[safe_idxs])
           path_xyz[:,1] = self.d_prob * lane_path_y_interp + (1.0 - self.d_prob) * path_xyz[:,1]
 
+
+    ## 교차로 등 laneless 저속 급커브에서 회전 부족 보정 - 웹당근에서 조정 가능
+    intersection_turn_boost = float(self.params.get_int("IntersectionTurnBoostPct")) * 0.01
+    if intersection_turn_boost > 0.0 and abs(curve_speed) > 0.1:
+      _laneless_gate = np.clip(1.0 - self.d_prob / 0.3, 0.0, 1.0)
+      _sharp_gate = np.clip((40.0 - abs(curve_speed)) / (40.0 - 10.0), 0.0, 1.0)
+      _dist_scale = np.clip(path_t / 3.0, 0.0, 1.0)
+      turn_boost_offset = intersection_turn_boost * _laneless_gate * _sharp_gate * _dist_scale * np.sign(curve_speed) * 1.0
+      path_xyz[:, 1] += turn_boost_offset
 
     path_xyz[:, 1] += (CAMERA_OFFSET + self.lane_offset_filtered.x + self.avoid_offset_filtered_x)
 

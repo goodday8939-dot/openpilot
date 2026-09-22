@@ -442,6 +442,12 @@ class CarrotPlanner:
     if getattr(self, "_fixed_gap_active", False):
       # Fixed-gap zone target is authoritative; skip the jLead-based nudging
       # so a lead accel/decel blip cannot widen or narrow it back open.
+      # But still let the controller react quickly once the lead is clearly
+      # moving off again, instead of lingering in the previous decel ramp
+      # until the fixed-gap target itself catches up (launch felt sluggish).
+      self.jerk_factor_apply = self.jerk_factor
+      if lead.status and lead.jLead > 0.3:
+        self.jerk_factor_apply = self.jerk_factor * 0.4
       return t_follow
     self.jerk_factor_apply = self.jerk_factor
 
