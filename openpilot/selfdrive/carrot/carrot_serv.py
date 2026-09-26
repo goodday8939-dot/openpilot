@@ -78,6 +78,7 @@ nav_type_mapping = {
 }
 
 import collections
+import csv
 
 COUNTDOWN_NEW_TARGET_MIN_JUMP_M = 20.0
 SCHOOL_ZONE_GAS_OVERRIDE_TIMEOUT_S = 3.0
@@ -214,11 +215,163 @@ class CarrotServ:
 
     self.debugText = ""
 
+    # YongPilot weekly curve updater v1
+    self.yong_weekly_last_check = 0.0
+
+    # YongPilot review alert v1
+    self.yong_curve_reviews = []
+    self._load_yong_curve_reviews()
+
     # 默认语言，稍后在 update_params 中从 Params 读取覆盖，
     # 规则：main_ko -> 韩语；main_zh-CHS -> 中文；其他 -> 英文
     self.lang = "en"
 
     self.update_params()
+
+  def _load_yong_curve_reviews(self):
+    self.yong_curve_reviews = []
+    path = "/data/yong_curve_review.csv"
+
+    try:
+      with open(path, newline="") as f:
+        for row in csv.DictReader(f):
+          try:
+            self.yong_curve_reviews.append({
+              "lat": float(row["latitude"]),
+              "lon": float(row["longitude"]),
+              "bearing": float(row["bearing_deg"]),
+              "speed": float(row["review_speed_kph"]),
+              "driver_count": int(row.get("driver_count", 0)),
+              "fault_count": int(row.get("fault_count", 0)),
+            })
+          except Exception:
+            continue
+
+      print(f"[YONG REVIEW] loaded={len(self.yong_curve_reviews)}")
+
+    except Exception as e:
+      print(f"[YONG REVIEW] load failed: {e}")
+
+
+  @staticmethod
+  def _yong_review_distance_m(lat1, lon1, lat2, lon2):
+    r = 6371000.0
+    lat1r = math.radians(lat1)
+    lat2r = math.radians(lat2)
+    dlat = lat2r - lat1r
+    dlon = math.radians(lon2 - lon1)
+    x = dlon * math.cos((lat1r + lat2r) * 0.5)
+    return r * math.sqrt(x * x + dlat * dlat)
+
+
+  @staticmethod
+  def _yong_review_heading_diff(a, b):
+    return abs((a - b + 180.0) % 360.0 - 180.0)
+
+
+  def get_yong_curve_review_status(self):
+    result = {
+      "active": False,
+      "distance": 9999,
+      "speed": 0,
+      "driverCount": 0,
+      "faultCount": 0,
+    }
+
+    if not self.gps_valid or not self.yong_curve_reviews:
+      return result
+
+    lat = float(self.vpPosPointLat)
+    lon = float(self.vpPosPointLon)
+    bearing = float(self.bearing)
+
+    if abs(lat) < 1e-6 or abs(lon) < 1e-6:
+      return result
+
+    best = None
+    best_dist = 999999.0
+
+    for item in self.yong_curve_reviews:
+      if self._yong_review_heading_diff(bearing, item["bearing"]) > 30.0:
+        continue
+
+      dist = self._yong_review_distance_m(
+        lat, lon,
+        item["lat"], item["lon"],
+      )
+
+      if dist <= 100.0 and dist < best_dist:
+        best = item
+        best_dist = dist
+
+    if best is None:
+      return result
+
+    result["active"] = True
+    result["distance"] = int(round(best_dist))
+    result["speed"] = int(round(best["speed"]))
+    result["driverCount"] = int(best["driver_count"])
+    result["faultCount"] = int(best["fault_count"])
+    return result
+
+
+  def _yong_weekly_curve_update(self):
+    now_mono = time.monotonic()
+
+    # 시간 확인은 60초에 한 번만
+    if now_mono - self.yong_weekly_last_check < 60.0:
+      return
+
+    self.yong_weekly_last_check = now_mono
+
+    try:
+      now = datetime.now()
+
+      # ISO year/week
+      iso = now.isocalendar()
+      week_key = f"{iso.year}-{iso.week:02d}"
+
+      marker_path = "/data/yong_curve_weekly_last_run"
+
+      last_week = ""
+      try:
+        with open(marker_path) as f:
+          last_week = f.read().strip()
+      except Exception:
+        pass
+
+      if last_week == week_key:
+        return
+
+      # 일요일 03:00 이후
+      # weekday(): Mon=0 ... Sun=6
+      if now.weekday() != 5 or now.hour < 3:
+        return
+
+      script = "/data/yong_curve_weekly_update.py"
+
+      if not os.path.exists(script):
+        print("[YONG WEEKLY] script not found")
+        return
+
+      log_path = "/data/yong_curve_weekly_update.log"
+
+      with open(log_path, "a") as logf:
+        subprocess.Popen(
+          ["python3", script],
+          stdout=logf,
+          stderr=logf,
+          start_new_session=True,
+        )
+
+      with open(marker_path, "w") as f:
+        f.write(week_key)
+
+      print("[YONG WEEKLY] UPDATE STARTED")
+
+    except Exception as e:
+      print(f"[YONG WEEKLY] error: {e}")
+
 
   def update_params(self):
     self.autoNaviSpeedBumpSpeed = float(self.params.get_int("AutoNaviSpeedBumpSpeed"))
@@ -233,6 +386,10 @@ class CarrotServ:
     self.autoNaviCountDownMode = self.params.get_int("AutoNaviCountDownMode")
     self.turnSpeedControlMode= self.params.get_int("TurnSpeedControlMode")
     self.mapTurnSpeedFactor= self.params.get_float("MapTurnSpeedFactor") * 0.01
+
+    # YongPilot: hold last valid map curve speed briefly during route dropouts
+    self.yong_last_route_speed = 300.0
+    self.yong_last_route_time = 0.0
 
     self.autoTurnControlSpeedTurn = self.params.get_int("AutoTurnControlSpeedTurn")
     self.autoTurnMapChange = self.params.get_int("AutoTurnMapChange")
@@ -266,6 +423,8 @@ class CarrotServ:
       self.carrotCmdIndex_last = self.carrotCmdIndex
       command_handlers = {
         "DETECT": self._handle_detect_command,
+        "CURVESPEED": self._handle_curve_speed_command,
+        "AVOID_V2": self._handle_avoid_v2_command,
       }
 
       handler = command_handlers.get(self.carrotCmd)
@@ -277,6 +436,38 @@ class CarrotServ:
     if self.traffic_light_count < 0:
       self.traffic_light_count = -1
       self.traffic_state = 0
+
+  def _handle_curve_speed_command(self, xArg):
+    arg = str(xArg).strip().upper()
+
+    if arg in ('ON', '1', 'TRUE'):
+      self.params.put('TurnSpeedControlMode', 2)
+      self.turnSpeedControlMode = 2
+      print('[YONG CURVE] ON mode=2')
+
+    elif arg in ('OFF', '0', 'FALSE'):
+      self.params.put('TurnSpeedControlMode', 0)
+      self.turnSpeedControlMode = 0
+      print('[YONG CURVE] OFF mode=0')
+
+  def _handle_avoid_v2_command(self, xArg):
+
+    arg = str(xArg).strip().upper()
+
+
+    if arg in ('ON', '1', 'TRUE'):
+
+      self.params.put('AvoidV2Enabled', 1)
+
+      print('[YONG AVOID] ON')
+
+
+    elif arg in ('OFF', '0', 'FALSE'):
+
+      self.params.put('AvoidV2Enabled', 0)
+
+      print('[YONG AVOID] OFF')
+
 
   def _handle_detect_command(self, xArg):
     elements = [e.strip() for e in xArg.split(',')]
@@ -1270,6 +1461,7 @@ class CarrotServ:
 
     self.debugText = ""
     self.update_params()
+    self._yong_weekly_curve_update()
     carrot_navi_active = self._update_carrot_navi(sm)
     if sm.alive['carState'] and sm.alive['selfdriveState']:
       CS = sm['carState']
@@ -1417,15 +1609,52 @@ class CarrotServ:
     if self.turnSpeedControlMode in [1,2]:
       speed_n_sources.append((max(abs(vturn_speed), self.autoCurveSpeedLowerLimit), "vturn"))
 
-    route_speed = max(route_speed * self.mapTurnSpeedFactor, self.autoCurveSpeedLowerLimit)
-    if self.turnSpeedControlMode == 2:
-      if -500 < self.xDistToTurn < 500:
-        speed_n_sources.append((route_speed, "route"))
-    elif self.turnSpeedControlMode in [3, 4]:
-      speed_n_sources.append((route_speed, "route"))
-      #speed_n_sources.append((self.calculate_current_speed(dist, speed * self.mapTurnSpeedFactor, 0, 1.2), "route"))
+    # YongPilot MAP + CAMERA hybrid curve-speed control
+    # carrot_navi_route() returns ~300 when map/route data is unavailable or no useful
+    # curvature is present. Only treat a sub-250 value as a usable map curve target.
+    raw_route_speed = route_speed
+    route_valid = 0 < raw_route_speed < 250
 
+    # Keep the last real map target for a short dropout window.
+    now_monotonic = time.monotonic()
+
+    if route_valid:
+      self.yong_last_route_speed = raw_route_speed
+      self.yong_last_route_time = now_monotonic
+
+    route_hold_active = (
+      not route_valid
+      and self.yong_last_route_time > 0.0
+      and (now_monotonic - self.yong_last_route_time) <= 1.0
+      and 0 < self.yong_last_route_speed < 250
+    )
+
+    if route_hold_active:
+      raw_route_speed = self.yong_last_route_speed
+      route_valid = True
+
+    route_speed = max(raw_route_speed * self.mapTurnSpeedFactor, self.autoCurveSpeedLowerLimit)
+
+    if route_valid:
+      if self.turnSpeedControlMode == 2:
+        if -500 < self.xDistToTurn < 500:
+          speed_n_sources.append((route_speed, "route"))
+      elif self.turnSpeedControlMode in [3, 4]:
+        speed_n_sources.append((route_speed, "route"))
+
+    # Camera/model remains available even when map data disappears.
+    camera_vturn_speed = max(abs(vturn_speed), self.autoCurveSpeedLowerLimit)
     model_turn_speed = max(sm['modelV2'].meta.modelTurnSpeed, self.autoCurveSpeedLowerLimit)
+
+    # Existing camera curve-speed modes
+    if self.turnSpeedControlMode in [1, 2]:
+      pass
+    # Route-oriented modes: automatically fall back to camera if route is unavailable.
+    elif self.turnSpeedControlMode in [3, 4] and not route_valid:
+      if camera_vturn_speed < 200:
+        speed_n_sources.append((camera_vturn_speed, "vturn_fallback"))
+
+    # Model speed is an independent real-time camera safety net.
     if model_turn_speed < 200 and abs(vturn_speed) < 120:
       speed_n_sources.append((model_turn_speed, "model"))
 
@@ -1633,6 +1862,8 @@ class CarrotServ:
       self.carrotCmd = json.get("carrotCmd")
       self.carrotArg = json.get("carrotArg")
       print(f"carrotCmd = {self.carrotCmd}, {self.carrotArg}")
+      if self.carrotCmd == "AVOID_V2":
+        self._handle_avoid_v2_command(self.carrotArg)
 
     self.active_count = 80
     now = time.monotonic()

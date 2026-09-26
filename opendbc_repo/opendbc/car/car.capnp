@@ -479,6 +479,10 @@ struct CarControl {
     naviEventType @19: Int16;   # VW MEB cluster: 0=없음 1=커브 2=교차로 3=분기/출구 4=로터리 5=병목 8=도로제한제어중
     naviEventSpeed @20: Int16;  # VW MEB cluster: 목표속도 kph (커브는 부호=방향: +우/-좌) -> ACC_Event_Wunschgeschw
     leadLimiting @21: Bool;     # VW MEB cluster: 앞차가 속도를 제한 중(xState lead) -> 앞차 하이라이트 우선
+    leadLeftDist @22: Float32;   # YongPilot HUD side: 좌측 차량 dRel (뒤쪽은 음수)
+    leadLeftLat @23: Float32;    # 좌측 차량 |yRel| (0=없음)
+    leadRightDist @24: Float32;  # 우측 차량 dRel (뒤쪽은 음수)
+    leadRightLat @25: Float32;   # 우측 차량 |yRel| (0=없음)
 
     # not used with the dash, TODO: separate structs for dash UI and device UI
     audibleAlert @5: AudibleAlert;

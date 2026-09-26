@@ -3,7 +3,11 @@ import time
 import pyray as rl
 
 from openpilot.selfdrive.ui.ui_state import ui_state
-from openpilot.selfdrive.ui.vision_status import parse_vision_display_packet, vision_display_state
+from openpilot.selfdrive.ui.vision_status import (
+  XIAOGE_OBJECT_TIMEOUT_NS,
+  parse_vision_display_packet,
+  vision_display_state,
+)
 from openpilot.system.ui.lib.application import FontWeight, gui_app
 from openpilot.system.ui.lib.multilang import tr
 from openpilot.system.ui.lib.text_measure import measure_text_cached
@@ -22,6 +26,61 @@ class VisionRenderer(Widget):
     super().__init__()
     self._font = gui_app.font(FontWeight.DISPLAY)
     self._packet = None
+    self._camera_transform = None
+
+  def set_camera_transform(self, transform):
+    self._camera_transform = transform
+
+  def _draw_objects(self, rect: rl.Rectangle):
+    if self._packet is None or self._camera_transform is None:
+      return
+
+    now_nanos = time.monotonic_ns()
+    t = self._camera_transform
+
+    for obj in self._packet.objects:
+      age = now_nanos - obj.received_nanos
+      if obj.received_nanos <= 0 or age < 0 or age > XIAOGE_OBJECT_TIMEOUT_NS:
+        continue
+
+      x1, y1, x2, y2 = obj.bbox
+
+      sx1 = float(t[0, 0] * x1 + t[0, 2])
+      sy1 = float(t[1, 1] * y1 + t[1, 2])
+      sx2 = float(t[0, 0] * x2 + t[0, 2])
+      sy2 = float(t[1, 1] * y2 + t[1, 2])
+
+      left = max(rect.x, min(sx1, sx2))
+      top = max(rect.y, min(sy1, sy2))
+      right = min(rect.x + rect.width, max(sx1, sx2))
+      bottom = min(rect.y + rect.height, max(sy1, sy2))
+
+      if right - left < 4 or bottom - top < 4:
+        continue
+
+      cls = obj.classification
+
+      if cls in ('APPROACHING', 'PASSING'):
+        color = AMBER
+      elif cls in ('LIKELY_STATIC', 'MOVING_WITH_US'):
+        color = CYAN
+      else:
+        color = GRAY
+
+      box = rl.Rectangle(left, top, right - left, bottom - top)
+      rl.draw_rectangle_lines_ex(box, 3.0, color)
+
+      side = 'L' if obj.side == 'left' else 'R'
+      short_cls = {
+        'APPROACHING': 'APPROACH',
+        'LIKELY_STATIC': 'STATIC',
+        'MOVING_WITH_US': 'MOVING',
+        'PASSING': 'PASSING',
+        'UNKNOWN': 'UNKNOWN',
+      }.get(cls, cls[:8])
+
+      label = f'{side} #{obj.track_id} {short_cls}'
+      self._text(label, left + 2, max(rect.y + 2, top - 17), color, 11, max(70, right - left))
 
   def _update_state(self):
     sm = ui_state.sm
@@ -65,6 +124,7 @@ class VisionRenderer(Widget):
     if not ui_state.share_data:
       return
     state = vision_display_state(self._packet, time.monotonic_ns())
+    self._draw_objects(rect)
     # Keep clear of the speed panel, its override speed, and the gear box.
     card = rl.Rectangle(rect.x + rect.width - 98, rect.y + rect.height - 96, 84, 78)
     rl.draw_rectangle_rounded(card, 0.14, 6, rl.Color(0, 0, 0, 190))

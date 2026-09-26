@@ -317,7 +317,9 @@ def create_lfahda_cluster(packer, CS, CAN, long_active, lat_active):
     rx_counter = None
     values["LFA_OptUsmSta"] = 2
     values["HDA_OptUsmSta"] = 2
-  values["HDA_CntrlModSta"] = 2 if long_active else 0
+  # YongPilot HDA ready v1: 작동 2 / 크루즈 메인 켜짐(대기) 1 / 꺼짐 0
+  _ready = bool(getattr(getattr(CS, "out", None), "cruiseState", None) and CS.out.cruiseState.available)
+  values["HDA_CntrlModSta"] = 2 if long_active else (1 if _ready else 0)
   values["HDA_LFA_SymSta"] = 2 if lat_active else 0
   return [packer.make_can_msg("LFAHDA_CLUSTER", CAN.ECAN, values, rx_counter=rx_counter)]
 
@@ -910,6 +912,21 @@ def create_ccnc_messages(CP, packer, CAN, frame, CC, CS, hud_control,
         # blinker hold
         values['LEFT_BLINK_HOLD'] = 1 if lane_changing == 3 else 0
         values['RIGHT_BLINK_HOLD'] = 1 if lane_changing == 4 else 0
+
+        # YongPilot HUD side v1: 오픈파일럿 레이더 옆차 -> 0x1ea (없으면 순정값 유지)
+        _side_t = CAR_MODEL_ID if 0 < CAR_MODEL_ID <= 7 else 3
+        for _d, _lat, _fr, _rr in ((hud_control.leadLeftDist, hud_control.leadLeftLat, 'LF', 'LR'),
+                                   (hud_control.leadRightDist, hud_control.leadRightLat, 'RF', 'RR')):
+          if _lat <= 0.0:
+            continue
+          if _d >= 0.0:
+            values[_fr + '_DETECT'] = _side_t
+            values[_fr + '_DETECT_DISTANCE'] = min(max(_d, 0.5), 200.0)
+            values[_fr + '_DETECT_LATERAL'] = min(_lat, 12.7)
+          else:
+            values[_rr + '_DETECT'] = _side_t
+            values[_rr + '_DETECT_DISTANCE'] = min(max(-_d, 0.5), 25.0)
+            values[_rr + '_DETECT_LATERAL'] = min(_lat, 6.3)
 
         _make_ccnc_values(
           values, CS, lat_active, frame, hud_control,

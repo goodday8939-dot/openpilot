@@ -144,7 +144,10 @@ class DesireHelper:
       atc_blinker_state = self.carrot_blinker_state
     elif carrotMan.carrotCmdIndex != self.carrot_cmd_index_last and carrotMan.carrotCmd == "LANECHANGE":
       self.carrot_cmd_index_last = carrotMan.carrotCmdIndex
-      self.carrot_lane_change_count = int(0.2 / DT_MDL)
+      # YongPilot PASS_BEHIND:
+      # Remote lane-change request must remain alive while a vehicle
+      # in the target lane is being allowed to pass.
+      self.carrot_lane_change_count = int(8.0 / DT_MDL)
       self.carrot_blinker_state = BLINKER_LEFT if carrotMan.carrotArg == "LEFT" else BLINKER_RIGHT
       atc_blinker_state = self.carrot_blinker_state
     elif atc_type in ("turn left", "turn right"):
@@ -487,6 +490,8 @@ class DesireHelper:
                       self.lane_change_state = LaneChangeState.laneChangeStarting
 
         elif self.lane_change_state == LaneChangeState.laneChangeStarting:
+          # PASS_BEHIND wait is finished once the actual lane change starts.
+          self.carrot_lane_change_count = 0
           self.lane_change_ll_prob = max(self.lane_change_ll_prob - 2 * DT_MDL, 0.0)
           if lane_change_prob < 0.02 and self.lane_change_ll_prob < 0.01:
             self.lane_change_state = LaneChangeState.laneChangeFinishing

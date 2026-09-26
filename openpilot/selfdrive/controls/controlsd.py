@@ -63,7 +63,7 @@ class Controls:
 
     self.sm = messaging.SubMaster(['liveDelay', 'liveParameters', 'liveTorqueParameters', 'modelV2', 'selfdriveState',
                                    'liveCalibration', 'livePose', 'longitudinalPlan', 'carState', 'carOutput',
-                                   'carrotMan', 'lateralPlan', 'radarState',
+                                   'carrotMan', 'lateralPlan', 'radarState', 'gpsLocationExternal',
                                    'driverMonitoringState', 'onroadEvents', 'driverAssistance'], poll='selfdriveState')
     self.pm = messaging.PubMaster(['carControl', 'controlsState'])
 
@@ -71,10 +71,51 @@ class Controls:
     self.curvature = 0.0
     self.desired_curvature = 0.0
 
+    # ========================================================
+    # YongPilot Curve Learning v1
+    # ========================================================
+    self.yong_curve_active = False
+    self.yong_curve_start_time = 0.0
+    self.yong_curve_last_seen_time = 0.0
+    self.yong_curve_entry_speed = 0.0
+    self.yong_curve_min_speed = 999.0
+    self.yong_curve_max_abs_curvature = 0.0
+    self.yong_curve_max_steer_angle = 0.0
+    self.yong_curve_driver_intervention = False
+    self.yong_curve_steer_fault = False
+    self.yong_curve_lat_active_seen = False
+    self.yong_curve_lat_drop_seen = False
+    self.yong_curve_prev_lat_active = False
+    self.yong_curve_gps_valid = False
+    self.yong_curve_latitude = 0.0
+    self.yong_curve_longitude = 0.0
+    self.yong_curve_bearing_deg = 0.0
+    self.yong_curve_gps_accuracy_m = 9999.0
+    self.yong_curve_log_path = "/data/yong_curve_learning_v2.csv"
+
     # 수동 LANECHANGE 명령으로 크루즈 꺼진 상태에서도 깜빡이만 켜기 위한 상태
     self.manual_blinker_count = 0
     self.manual_blinker_state = 0  # 0: none, 1: left, 2: right
     self.manual_blinker_cmd_index_last = 0
+
+    # ========================================================
+    # YongPilot Remote Lane Change PASS_BEHIND
+    # ========================================================
+    self.remote_lc_active = False
+    self.remote_lc_direction = 0       # 1:left, 2:right
+    self.remote_lc_timer = 0.0
+    self.remote_lc_start_speed = 0.0
+    self.remote_lc_decel_cmd = 0.0
+
+    # Maximum waiting time for one remote lane-change request.
+    self.remote_lc_timeout = 8.0
+
+    # Maximum intentional speed reduction from request speed.
+    self.remote_lc_max_speed_drop = 7.0 / 3.6
+
+    # Gentle PASS_BEHIND deceleration.
+    self.remote_lc_max_decel = -0.50
+
 
     # VW MEB(ID.4/ID.5)에서만 사용. infiniteCable2 LatControlCurvature 정확 복제:
     # EnableCurvatureController=1(기본 ON) 상태의 곡률 폐루프 PID + useCarSteerCurvature 보정
@@ -112,6 +153,199 @@ class Controls:
     if self.sm.updated["livePose"]:
       device_pose = Pose.from_live_pose(self.sm['livePose'])
       self.calibrated_pose = self.pose_calibrator.build_calibrated_pose(device_pose)
+
+  def _update_yong_curve_learning(self, CS, CC):
+    now = time.monotonic()
+
+    # Use current commanded/model curvature magnitude as the curve indicator.
+    curv = float(self.desired_curvature)
+    abs_curv = abs(curv)
+    speed_kph = float(CS.vEgo) * 3.6
+
+    CURVE_START = 0.0015
+    CURVE_END = 0.0010
+    END_HOLD = 1.0
+    MIN_DURATION = 1.5
+    MIN_SPEED_KPH = 15.0
+
+    # Start a new curve sample.
+    if (
+      not self.yong_curve_active
+      and abs_curv >= CURVE_START
+      and speed_kph >= MIN_SPEED_KPH
+    ):
+      self.yong_curve_active = True
+      self.yong_curve_start_time = now
+      self.yong_curve_last_seen_time = now
+      self.yong_curve_entry_speed = speed_kph
+      self.yong_curve_min_speed = speed_kph
+      self.yong_curve_max_abs_curvature = abs_curv
+      self.yong_curve_max_steer_angle = abs(float(CS.steeringAngleDeg))
+      self.yong_curve_driver_intervention = bool(CS.steeringPressed)
+      self.yong_curve_steer_fault = bool(CS.steerFaultTemporary)
+      self.yong_curve_lat_active_seen = bool(CC.latActive)
+      self.yong_curve_lat_drop_seen = False
+      self.yong_curve_prev_lat_active = bool(CC.latActive)
+
+      # Snapshot GPS at curve entry
+      self.yong_curve_gps_valid = False
+      self.yong_curve_latitude = 0.0
+      self.yong_curve_longitude = 0.0
+      self.yong_curve_bearing_deg = 0.0
+      self.yong_curve_gps_accuracy_m = 9999.0
+
+      try:
+        gps = self.sm['gpsLocationExternal']
+        if self.sm.recv_frame['gpsLocationExternal'] > 0 and bool(gps.hasFix):
+          self.yong_curve_gps_valid = True
+          self.yong_curve_latitude = float(gps.latitude)
+          self.yong_curve_longitude = float(gps.longitude)
+          self.yong_curve_bearing_deg = float(gps.bearingDeg)
+          self.yong_curve_gps_accuracy_m = float(gps.horizontalAccuracy)
+      except Exception:
+        pass
+
+      return
+
+    if not self.yong_curve_active:
+      return
+
+    # Update current curve sample.
+    self.yong_curve_min_speed = min(self.yong_curve_min_speed, speed_kph)
+    self.yong_curve_max_abs_curvature = max(
+      self.yong_curve_max_abs_curvature,
+      abs_curv,
+    )
+    self.yong_curve_max_steer_angle = max(
+      self.yong_curve_max_steer_angle,
+      abs(float(CS.steeringAngleDeg)),
+    )
+
+    if CS.steeringPressed:
+      self.yong_curve_driver_intervention = True
+
+    if CS.steerFaultTemporary:
+      self.yong_curve_steer_fault = True
+
+    if CC.latActive:
+      self.yong_curve_lat_active_seen = True
+
+    if (
+      self.yong_curve_prev_lat_active
+      and not CC.latActive
+      and not CS.steeringPressed
+    ):
+      self.yong_curve_lat_drop_seen = True
+
+    self.yong_curve_prev_lat_active = bool(CC.latActive)
+
+    if abs_curv >= CURVE_END:
+      self.yong_curve_last_seen_time = now
+      return
+
+    # Wait until curvature has stayed low long enough.
+    if now - self.yong_curve_last_seen_time < END_HOLD:
+      return
+
+    duration = now - self.yong_curve_start_time
+
+    if duration >= MIN_DURATION:
+      radius_m = (
+        1.0 / self.yong_curve_max_abs_curvature
+        if self.yong_curve_max_abs_curvature > 1e-6
+        else 99999.0
+      )
+
+      mode = "PILOT" if self.yong_curve_lat_active_seen else "MANUAL"
+
+      if self.yong_curve_steer_fault:
+        result = "FAULT"
+      elif self.yong_curve_driver_intervention:
+        result = "DRIVER"
+      elif mode == "PILOT" and not self.yong_curve_lat_drop_seen:
+        result = "PASS"
+      elif mode == "PILOT":
+        result = "LAT_DROP"
+      else:
+        result = "MANUAL"
+
+      unix_time = int(time.time())
+
+      try:
+        custom_steer_max = Params().get_int("CustomSteerMax")
+      except Exception:
+        custom_steer_max = 0
+
+      header = (
+        "unix_time,mode,result,duration_s,entry_speed_kph,"
+        "min_speed_kph,max_abs_curvature,radius_m,"
+        "max_steer_angle_deg,driver_intervention,"
+          "steer_fault,lat_drop,gps_valid,latitude,longitude,bearing_deg,gps_accuracy_m,"
+          "custom_steer_max\n"
+      )
+
+      row = (
+        f"{unix_time},{mode},{result},{duration:.2f},"
+        f"{self.yong_curve_entry_speed:.1f},"
+        f"{self.yong_curve_min_speed:.1f},"
+        f"{self.yong_curve_max_abs_curvature:.6f},"
+        f"{radius_m:.1f},"
+        f"{self.yong_curve_max_steer_angle:.1f},"
+        f"{int(self.yong_curve_driver_intervention)},"
+        f"{int(self.yong_curve_steer_fault)},"
+        f"{int(self.yong_curve_lat_drop_seen)},"
+        f"{int(self.yong_curve_gps_valid)},"
+        f"{self.yong_curve_latitude:.7f},"
+        f"{self.yong_curve_longitude:.7f},"
+        f"{self.yong_curve_bearing_deg:.1f},"
+          f"{self.yong_curve_gps_accuracy_m:.1f},"
+          f"{custom_steer_max}\n"
+      )
+
+      try:
+        need_header = False
+        try:
+          with open(self.yong_curve_log_path, "r"):
+            pass
+        except FileNotFoundError:
+          need_header = True
+
+        with open(self.yong_curve_log_path, "a") as f:
+          if need_header:
+            f.write(header)
+          f.write(row)
+
+        print(
+          f"[YONG CURVE LEARN] {mode} {result} "
+          f"entry={self.yong_curve_entry_speed:.1f} "
+          f"min={self.yong_curve_min_speed:.1f} "
+          f"radius={radius_m:.1f}m "
+          f"gps={int(self.yong_curve_gps_valid)} "
+          f"acc={self.yong_curve_gps_accuracy_m:.1f}m"
+        )
+
+      except Exception as e:
+        print(f"[YONG CURVE LEARN] write failed: {e}")
+
+    # Reset for next curve.
+    self.yong_curve_active = False
+    self.yong_curve_start_time = 0.0
+    self.yong_curve_last_seen_time = 0.0
+    self.yong_curve_entry_speed = 0.0
+    self.yong_curve_min_speed = 999.0
+    self.yong_curve_max_abs_curvature = 0.0
+    self.yong_curve_max_steer_angle = 0.0
+    self.yong_curve_driver_intervention = False
+    self.yong_curve_steer_fault = False
+    self.yong_curve_lat_active_seen = False
+    self.yong_curve_lat_drop_seen = False
+    self.yong_curve_prev_lat_active = False
+
+    self.yong_curve_gps_valid = False
+    self.yong_curve_latitude = 0.0
+    self.yong_curve_longitude = 0.0
+    self.yong_curve_bearing_deg = 0.0
+    self.yong_curve_gps_accuracy_m = 9999.0
 
   def state_control(self):
     CS = self.sm['carState']
@@ -175,6 +409,14 @@ class Controls:
       self.manual_blinker_cmd_index_last = _cm.carrotCmdIndex
       self.manual_blinker_count = int(0.2 / DT_CTRL)
       self.manual_blinker_state = 1 if _cm.carrotArg == "LEFT" else 2
+
+      # YongPilot PASS_BEHIND:
+      # Only a Carrot remote LANECHANGE command arms this function.
+      self.remote_lc_active = True
+      self.remote_lc_direction = self.manual_blinker_state
+      self.remote_lc_timer = self.remote_lc_timeout
+      self.remote_lc_start_speed = float(CS.vEgo)
+      self.remote_lc_decel_cmd = 0.0
     if self.manual_blinker_count > 0:
       CC.leftBlinker = CC.leftBlinker or (self.manual_blinker_state == 1)
       CC.rightBlinker = CC.rightBlinker or (self.manual_blinker_state == 2)
@@ -188,6 +430,143 @@ class Controls:
     pid_accel_limits = self.CI.get_pid_accel_limits(self.CP, CS.vEgo, CS.vCruise * CV.KPH_TO_MS)
     t_since_plan = (self.sm.frame - self.sm.recv_frame['longitudinalPlan']) * DT_CTRL
     accel, aTarget, jerk = self.LoC.update(CC.longActive, CS, long_plan, pid_accel_limits, t_since_plan, self.sm['radarState'])
+
+    # ========================================================
+    # YongPilot PASS_BEHIND
+    #
+    # Applies ONLY to a remote LANECHANGE command.
+    #
+    # Existing longitudinal control always keeps priority:
+    # PASS_BEHIND may request additional gentle deceleration,
+    # but can never weaken stronger braking already requested
+    # by the planner / lead control / safety logic.
+    # ========================================================
+
+    radar_state = self.sm['radarState']
+
+    if self.remote_lc_active:
+      self.remote_lc_timer = max(
+        0.0,
+        self.remote_lc_timer - DT_CTRL
+      )
+
+    lc_state = model_v2.meta.laneChangeState
+
+    # Driver brake, timeout, disengagement, or actual lane change
+    # immediately cancels PASS_BEHIND.
+    remote_lc_cancel = (
+      self.remote_lc_timer <= 0.0 or
+      CS.brakePressed or
+      not CC.longActive or
+      lc_state in (
+        LaneChangeState.laneChangeStarting,
+        LaneChangeState.laneChangeFinishing,
+      )
+    )
+
+    if remote_lc_cancel:
+      self.remote_lc_active = False
+      self.remote_lc_direction = 0
+      self.remote_lc_decel_cmd = 0.0
+
+    elif (
+      self.remote_lc_active and
+      lc_state == LaneChangeState.preLaneChange
+    ):
+
+      if self.remote_lc_direction == 1:
+        side_lead = radar_state.leadLeft
+        blindspot = CS.leftBlindspot
+
+      else:
+        side_lead = radar_state.leadRight
+        blindspot = CS.rightBlindspot
+
+
+      # ------------------------------------------------------
+      # Target-lane vehicle detection
+      # ------------------------------------------------------
+
+      side_radar_valid = (
+        side_lead.status and
+        side_lead.dRel > 0.0 and
+        side_lead.dRel < max(12.0, CS.vEgo * 2.0)
+      )
+
+      target_lane_blocked = (
+        blindspot or
+        side_radar_valid
+      )
+
+
+      # ------------------------------------------------------
+      # Is PASS_BEHIND useful?
+      #
+      # Negative vRel means the side vehicle is becoming
+      # relatively slower / falling back.
+      #
+      # If it is already falling behind us, do NOT continue
+      # slowing the ego vehicle to chase a "pass behind".
+      # ------------------------------------------------------
+
+      if side_radar_valid:
+        side_vrel = float(side_lead.vRel)
+
+        pass_behind_useful = (
+          side_vrel > -0.30
+        )
+      else:
+        # Blindspot without a reliable side radar track:
+        # permit only conservative gentle yielding.
+        side_vrel = 0.0
+        pass_behind_useful = bool(blindspot)
+
+
+      speed_drop = (
+        self.remote_lc_start_speed -
+        float(CS.vEgo)
+      )
+
+      below_speed_drop_limit = (
+        speed_drop <
+        self.remote_lc_max_speed_drop
+      )
+
+
+      if (
+        target_lane_blocked and
+        pass_behind_useful and
+        below_speed_drop_limit
+      ):
+
+        # Smoothly build deceleration instead of instantly requesting -0.5.
+        # Around 2 seconds to reach the maximum request.
+        self.remote_lc_decel_cmd = max(
+          self.remote_lc_max_decel,
+          self.remote_lc_decel_cmd - 0.25 * DT_CTRL
+        )
+
+        # Existing stronger braking always wins.
+        accel = min(
+          accel,
+          self.remote_lc_decel_cmd
+        )
+
+      else:
+        # Vehicle is not passing us, space is already clear,
+        # or the maximum speed reduction has been reached.
+        #
+        # Release PASS_BEHIND quickly instead of continuing
+        # unnecessary deceleration.
+        self.remote_lc_decel_cmd = min(
+          0.0,
+          self.remote_lc_decel_cmd + 0.60 * DT_CTRL
+        )
+
+    else:
+      # Remote request exists, but we are not in the waiting state.
+      self.remote_lc_decel_cmd = 0.0
+
     actuators.accel = float(accel)
     actuators.aTarget = float(aTarget)
     actuators.jerk = float(jerk)
@@ -224,11 +603,47 @@ class Controls:
         curvature = get_lag_adjusted_curvature(self.CP, CS.vEgo, lat_plan.psis, lat_plan.curvatures, steer_actuator_delay + lat_smooth_seconds, lat_plan.distances)
         new_desired_curvature = smooth_value(curvature, self.desired_curvature, lat_smooth_seconds)
     else:      
-      new_desired_curvature = smooth_value(model_v2.action.desiredCurvature, self.desired_curvature, 0.1)
+      # YongPilot curve-exit smoothing
+      raw_curvature = float(model_v2.action.desiredCurvature)
+
+      same_direction = raw_curvature * self.desired_curvature > 0.0
+      releasing_curve = (
+        same_direction
+        and abs(raw_curvature) < abs(self.desired_curvature)
+        and abs(self.desired_curvature) > 0.010
+        and abs(raw_curvature) > 0.006
+      )
+
+      # Curve entry/tightening: existing response (0.10 s)
+      # Curve exit/release: slightly slower response (0.20 s)
+      curve_tau = 0.20 if releasing_curve else 0.10
+
+      # YongPilot straight-line micro-steering filter
+      # Only filter when both current and previous curvature are nearly straight.
+      straight_zone = (
+        abs(raw_curvature) < 0.0010
+        and abs(self.desired_curvature) < 0.0010
+      )
+
+      if straight_zone:
+        # YongPilot v1: suppress small false curvature on near-straight roads
+        new_desired_curvature = (
+          self.desired_curvature
+          + 0.10 * (raw_curvature - self.desired_curvature)
+        )
+      else:
+        new_desired_curvature = smooth_value(
+          raw_curvature,
+          self.desired_curvature,
+          curve_tau,
+        )
 
     self.desired_curvature, curvature_limited = clip_curvature(CS.vEgo, self.desired_curvature, new_desired_curvature, lp.roll)
 
     actuators.curvature = float(self.desired_curvature)
+
+    # YongPilot curve learning logger
+    self._update_yong_curve_learning(CS, CC)
 
     # VW MEB 폐루프 곡률 보정 = infiniteCable2 LatControlCurvature.update() 정확 복제.
     # carrot엔 곡률 전용 횡제어기가 없어 모델 목표곡률을 open-loop로 보내면 EPS가 명령만큼 안 꺾여
@@ -378,6 +793,13 @@ class Controls:
     hudControl.leadRelSpeed = leadOne.vRel if leadOne.status else 0
     hudControl.leadRadar = 1 if leadOne.radar else 0
     hudControl.leadDPath = leadOne.dPath
+    # YongPilot HUD side v1: 옆차로 차량 -> 차량 계기판/HUD
+    _rs = self.sm['radarState']
+    for _sl, _da, _la in ((_rs.leadLeft, 'leadLeftDist', 'leadLeftLat'),
+                          (_rs.leadRight, 'leadRightDist', 'leadRightLat')):
+      _ok = bool(_sl.status) and -25.0 < float(_sl.dRel) < 120.0
+      setattr(hudControl, _da, float(_sl.dRel) if _ok else 0.0)
+      setattr(hudControl, _la, max(abs(float(_sl.yRel)), 0.1) if _ok else 0.0)
 
     meta = self.sm['modelV2'].meta
     if False: # command

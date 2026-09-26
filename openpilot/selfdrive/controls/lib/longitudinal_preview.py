@@ -104,7 +104,7 @@ LEAD_ACCEL_RESPONSE_TUNING = {
   2: LeadAccelResponseTuning(0.25, -0.10, 0.40, 0.60),
   3: LeadAccelResponseTuning(0.40, -0.15, 0.18, 0.35),
   4: LeadAccelResponseTuning(0.75, -0.30, 0.04, 0.12),
-  5: LeadAccelResponseTuning(0.625, -0.25, 0.0139, 0.064),
+  5: LeadAccelResponseTuning(0.625, -0.10, 0.0139, 0.064),
 }
 
 
@@ -152,17 +152,28 @@ def lead_accel_response_allowed(level: int, *, v_rel: float, gap_margin: float,
   # positive lead acceleration with a cruise source because relative
   # acceleration may be near zero while an existing gap is opening.
   positive_lead_accel = a_lead > LEAD_ACCEL_DEADBAND
-  # Cost reduction is only for catching back up to the configured TF. Once
-  # that distance is reached, normal MPC costs resume and maintain the gap.
-  # LAUNCH_GAP_MARGIN_TOLERANCE_M: allow engagement slightly before the gap
-  # actually exceeds the target so a departing lead at a stop (gap_margin
-  # near/at 0, since stop distance ~= target distance at v=0) is matched
-  # immediately instead of only after a gap has already opened.
+
+  # Level 5: if the lead is already pulling away and the gap is no more than
+  # 0.5 m inside the configured target, keep the MPC response available even when measured
+  # lead acceleration has returned close to zero. This avoids waiting for
+  # another positive aLead sample after the gap has already started opening.
+  pullaway_gap_response = (
+    response_level == LEAD_ACCEL_RESPONSE_MAX
+    and gap_margin >= -0.5
+    and v_rel > 0.05
+  )
+
+  # Cost reduction is only for catching back up to the configured TF.
   if (gap_margin <= -LAUNCH_GAP_MARGIN_TOLERANCE_M or
       v_rel < tuning.closing_speed_floor or
-      not positive_lead_accel or
+      not (positive_lead_accel or pullaway_gap_response) or
       (response_level < LEAD_ACCEL_RESPONSE_MAX and not cruise_source_active and lead_accel_signal <= 0.0)):
     return False
+
+  # For the level-5 pull-away extension, positive vRel itself is sufficient:
+  # the lead is already moving away from ego.
+  if pullaway_gap_response:
+    return True
 
   predicted_v_rel = float(v_rel) + float(lead_accel_signal) * tuning.prediction_horizon
   return predicted_v_rel >= 0.0
@@ -220,18 +231,45 @@ def get_lead_preview_request(
   lead_status: bool,
   a_lead: float,
   a_ego: float = 0.0,
+  v_rel: float = 0.0,
 ) -> PreviewRequest:
-  """Map negative relative acceleration to an early-deceleration preview."""
+  """Map lead deceleration and closing speed to an early-deceleration preview."""
   tuning = MODE_TUNING.get(_mode_value(driving_mode))
-  if tuning is None or not lead_status or not all(math.isfinite(value) for value in (a_lead, a_ego)):
+  if tuning is None or not lead_status or not all(math.isfinite(value) for value in (a_lead, a_ego, v_rel)):
     return PreviewRequest(0.0, 0.0, False)
 
   lead_accel_signal = _lead_accel_signal(a_lead, a_ego, tuning.ego_accel_factor)
-  offset_s = (
+
+  # Yong follow:
+  # Negative vRel means ego is closing on the lead.
+  # Begin preparing deceleration before the closing speed becomes large.
+  #
+  #   vRel >= -0.05 m/s : no additional closing-speed preview
+  #   vRel  = -0.20 m/s : about 0.18 s preview
+  #   vRel  = -0.30 m/s : about 0.30 s preview
+  #   vRel  = -0.60 m/s : about 0.65 s preview
+  #
+  # Existing lead-acceleration preview remains intact.  We take the larger
+  # request rather than adding the two, avoiding excessive double counting.
+  closing_preview = 0.0
+  if v_rel < -0.05:
+    closing_preview = min(max((-v_rel - 0.05) * 1.2, 0.0), 0.75)
+
+  accel_preview = (
     min(-lead_accel_signal * tuning.decel_factor, tuning.decel_preview_max)
     if lead_accel_signal < 0.0 else 0.0
   )
-  return PreviewRequest(float(offset_s), float(lead_accel_signal), True)
+
+  offset_s = max(accel_preview, closing_preview)
+
+  # apply_preview_target() only applies early deceleration when this signal
+  # is negative.  When closing speed alone requests preview, provide a small
+  # negative signal without changing the MPC trajectory or physical limits.
+  preview_signal = lead_accel_signal
+  if closing_preview > 0.0 and preview_signal >= 0.0:
+    preview_signal = -0.01
+
+  return PreviewRequest(float(offset_s), float(preview_signal), True)
 
 
 def rate_limit_preview(

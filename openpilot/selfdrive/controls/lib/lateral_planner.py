@@ -162,9 +162,17 @@ class LateralPlanner:
 
     self.path_xyz[:, 1] += self.pathOffset
 
+    # YongPilot lane-change finishing smoothing:
+    # Keep the normal steering-rate cost during ordinary driving, turns,
+    # curves, and lane-change entry. Only soften the return steering while
+    # the lane change is finishing to reduce opposite-direction overshoot.
+    steering_rate_cost = STEERING_RATE_COST
+    if md.meta.laneChangeState == log.LaneChangeState.laneChangeFinishing:
+      steering_rate_cost = max(STEERING_RATE_COST, 950.0)
+
     self.lat_mpc.set_weights(self.lateralPathCost, self.lateralMotionCost,
                              LATERAL_ACCEL_COST, LATERAL_JERK_COST,
-                             STEERING_RATE_COST)
+                             steering_rate_cost)
 
     y_pts = self.path_xyz[:LAT_MPC_N+1, 1]
     heading_pts = self.plan_yaw[:LAT_MPC_N+1]

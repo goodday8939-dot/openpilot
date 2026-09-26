@@ -153,7 +153,17 @@ class CarrotPlanner:
     self.tFollowGap4 = 1.6
 
     self.dynamicTFollow = 0.0
+    self.dynamicTFollowDecel = 0.0
+    self.dynamicTFollowAccel = 0.0
     self.leadAccelResponse = 0
+    self.fixedGapZone1 = FIXED_GAP_ZONE1_KPH
+    self.fixedGapZone2 = FIXED_GAP_ZONE2_KPH
+    self.fixedGapZone3 = FIXED_GAP_ZONE3_KPH
+    self.fixedGapZone4 = FIXED_GAP_ZONE4_KPH
+    self.fixedGapDelta1 = FIXED_GAP_ZONE1_DELTA_M
+    self.fixedGapDelta2 = FIXED_GAP_ZONE2_DELTA_M
+    self.fixedGapDelta3 = FIXED_GAP_ZONE3_DELTA_M
+    self.fixedGapDelta4 = FIXED_GAP_ZONE4_DELTA_M
     self.dynamicTFollowLC = 1.0
     self.enableSpeedTF = 0
     self.tFollowDecelBoost = 0.0
@@ -352,7 +362,7 @@ class CarrotPlanner:
     return float(np.clip(t_follow, max(0.05, tf_min), tf_max))  # lowered floor from 0.3, then 0.15
 
   def get_T_FOLLOW(self, personality=log.LongitudinalPersonality.standard, v_ego=0.0, a_ego=0.0,
-                   lead_status=False, lead_accel=0.0):
+                   lead_status=False, lead_accel=0.0, lead_v_rel=0.0):
     v_kph_now = v_ego * CV.MS_TO_KPH
 
     # Below FIXED_GAP_ZONE2_KPH, hold a flat target distance regardless of
@@ -379,9 +389,19 @@ class CarrotPlanner:
       else:
         target_m = self.stop_distance + self.fixedGapDelta4
       if v_ego > FIXED_GAP_MIN_V_MS:
-        # desired_follow_distance(v_ego==v_lead) ~= stop_distance + t_follow*v_ego,
-        # so solve for the t_follow that makes that sum equal target_m.
+        # Base fixed-gap target stays tight during steady following.
+        # When ego is closing on the lead, add a small continuous time-gap
+        # allowance instead of switching abruptly between fixed-gap and normal TF.
         tf_needed = (target_m - self.stop_distance) / v_ego
+
+        closing_speed = max(0.0, -float(lead_v_rel))
+        closing_tf_extra = float(np.interp(
+          closing_speed,
+          [0.0, 1.5, 3.0, 5.0, 8.0],
+          [0.0, 0.0, 0.04, 0.10, 0.16],
+        ))
+
+        tf_needed += closing_tf_extra
         tf_mode_target = float(np.clip(tf_needed, 0.0, FIXED_GAP_MAX_T_FOLLOW))
       else:
         # Too close to a standstill for target_m/v_ego to mean anything sane;
@@ -558,7 +578,20 @@ class CarrotPlanner:
       atc_active = self.activeCarrot > 1 and 0 < self.xDistToTurn < 100
       self.atcType = carrot_man.atcType
 
-      v_cruise_kph = min(v_cruise_kph, carrot_man.desiredSpeed)
+      # YongPilot: 저속 앞차 출발 추종 중에는
+      # vturn/model의 저속 curve target이 크루즈 가속을 막지 않도록 한다.
+      lead = sm['radarState'].leadOne
+      desired_source = str(carrot_man.desiredSource)
+
+      lead_departure_follow = (
+        bool(lead.status) and
+        v_ego_kph < 45.0 and
+        float(lead.vRel) > 0.50 and
+        desired_source in ("vturn", "model")
+      )
+
+      if not lead_departure_follow:
+        v_cruise_kph = min(v_cruise_kph, carrot_man.desiredSpeed)
 
     return v_cruise_kph, atc_active
 

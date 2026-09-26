@@ -351,6 +351,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"FixedGapZone3Kph", {PERSISTENT, INT, "95"}},
     {"FixedGapZone4Kph", {PERSISTENT, INT, "115"}},
     {"AvoidOffsetBoostPct", {PERSISTENT, INT, "160"}},
+    {"AvoidV2Enabled", {PERSISTENT, INT, "1"}},
     {"AvoidAttackTauCs", {PERSISTENT, INT, "40"}},
     {"AvoidReleaseTauCs", {PERSISTENT, INT, "350"}},
     {"LaneChangeNeedTorque", {PERSISTENT, INT, "0"}},

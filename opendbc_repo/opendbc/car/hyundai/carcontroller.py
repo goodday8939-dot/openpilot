@@ -208,7 +208,7 @@ class CarController(CarControllerBase):
 
     self.apply_angle_last = 0
     self.lkas_max_torque = 0
-    self.angle_max_torque = 250
+    self.angle_max_torque = 254
     self.steering_pressed_prev = False
     self.recovering_from_override = False
     self.full_recovery_frames = 0
@@ -368,48 +368,100 @@ class CarController(CarControllerBase):
       ))
     recovery_allowed = False
 
+    # YongPilot uniform driver steering handoff
+    # Driver override: retain only 20% LKAS authority while driver is steering.
+    override_authority = 0.20
+    override_drop_time = 0.12
+    override_recovery_time = 0.60
+    override_release_time = 0.15
+
+    torque_range = max(
+      self.angle_max_torque - self.params.ANGLE_MIN_TORQUE,
+      1.0,
+    )
+
+    override_target_torque = (
+      self.params.ANGLE_MIN_TORQUE +
+      torque_range * override_authority
+    )
+
+    override_drop_rate = (
+      torque_range * (1.0 - override_authority) *
+      DT_CTRL / max(override_drop_time, DT_CTRL)
+    )
+
     if CS.out.steeringPressed:
-      # Start yielding immediately when driver override is confirmed.
+      # Driver has clearly taken steering input:
+      # smoothly lower LKAS authority to the speed-dependent floor.
       self.override_latched = True
       self.override_release_frames = 0
-      torque_delta = -20.0
+
+      torque_delta = max(
+        override_target_torque - self.lkas_max_torque,
+        -override_drop_rate,
+      )
+
     elif pre_override_yield > 0.0:
-      # Start handing off gently before steeringPressed flips to avoid a sharp torque drop.
-      torque_delta = PRE_OVERRIDE_MAX_TORQUE_DELTA * pre_override_yield
+      # Begin yielding slightly before steeringPressed flips true.
+      pre_override_authority = (
+        1.0 -
+        (1.0 - override_authority) * pre_override_yield
+      )
+
+      pre_override_target = (
+        self.params.ANGLE_MIN_TORQUE +
+        torque_range * pre_override_authority
+      )
+
+      torque_delta = max(
+        pre_override_target - self.lkas_max_torque,
+        -override_drop_rate * pre_override_yield,
+      )
+
     elif self.lkas_max_torque >= self.angle_max_torque:
-      # Once fully recovered, hold full authority until the next driver override.
       torque_delta = 0.0
+
     elif self.override_latched:
-      # Hold reduced authority until driver torque stays below 60% for 0.2 seconds.
-      self.override_release_frames = self.override_release_frames + 1 if torque_ratio < 0.6 else 0
-      if self.override_release_frames >= int(0.2 / DT_CTRL):
+      # Low-speed YongPilot recovery:
+      # release sooner after the driver lets go, while preserving
+      # the stronger driver-yield behavior during active steering.
+      low_speed_recovery = CS.out.vEgo < (30.0 / 3.6)
+
+      release_torque_ratio = 0.70 if low_speed_recovery else 0.60
+      effective_release_time = 0.08 if low_speed_recovery else override_release_time
+
+      self.override_release_frames = (
+        self.override_release_frames + 1
+        if torque_ratio < release_torque_ratio else 0
+      )
+
+      if self.override_release_frames >= max(1, int(effective_release_time / DT_CTRL)):
         self.override_latched = False
         self.override_release_frames = 0
         recovery_allowed = True
       else:
         torque_delta = 0.0
+
     else:
       recovery_allowed = True
 
     if recovery_allowed:
-      # Use one-second model uncertainty to set the base torque recovery time.
-      # Missing or invalid model data falls back to a moderate 1.5-second recovery.
-      y_std_1s = 0.2
-      if CS.modelV2 is not None and len(CS.modelV2.position.yStd) > 10:
-        model_y_std_1s = float(CS.modelV2.position.yStd[10])
-        if np.isfinite(model_y_std_1s) and model_y_std_1s >= 0.0:
-          y_std_1s = model_y_std_1s
+      # Faster recovery below 30 km/h after the driver releases the wheel.
+      effective_recovery_time = (
+        0.30 if CS.out.vEgo < (30.0 / 3.6)
+        else override_recovery_time
+      )
 
-      recovery_time = float(np.interp(y_std_1s, [0.1, 0.2, 0.3, 0.4], [0.5, 0.8, 1.5, 3.0]))
-      recovery_time = max(recovery_time, float(np.interp(
-        self.repeated_override_count,
-        [0, 1, 2, 3],
-        [0.1, 1.0, 2.0, 3.0],
-      )))
-      base_rate_up = (self.angle_max_torque - self.params.ANGLE_MIN_TORQUE) * DT_CTRL / recovery_time
+      base_rate_up = (
+        torque_range * DT_CTRL /
+        max(effective_recovery_time, DT_CTRL)
+      )
 
-      # During recovery, taper the rate to zero. Only steeringPressed can reduce authority.
-      torque_delta = base_rate_up * float(np.interp(torque_ratio, [0.6, 0.8], [1.0, 0.0]))
+      # If driver torque is still present, do not fight the driver.
+      torque_delta = base_rate_up * float(
+        np.interp(torque_ratio, [0.6, 0.8], [1.0, 0.0])
+      )
+
     self.lkas_max_torque = float(np.clip(self.lkas_max_torque + torque_delta,
                                          self.params.ANGLE_MIN_TORQUE, angle_torque_cap))
 

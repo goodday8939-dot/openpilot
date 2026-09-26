@@ -48,6 +48,10 @@ MAX_BASE_INTERVAL_SECONDS = 1.0
 BASE_INTERVAL_SECONDS = 0.25
 FOLLOWUP_INTERVAL_SECONDS = 0.15
 FOLLOWUP_WINDOW_SECONDS = 1.5
+OBJECT_SCAN_INTERVAL_SECONDS = 0.8
+OBJECT_TRACK_MATCH_MAX_PX = 220.0
+OBJECT_TRACK_MAX_AGE_NS = 4_000_000_000
+OBJECT_TRACK_LOG_PATH = "/data/yong_object_tracker.log"
 VASM_MIN_SPEED_MPS = 30.0 / 3.6
 VASM_MAX_SPEED_MPS = 120.0 / 3.6
 VASM_MIN_LANE_WIDTH_METERS = 3.0
@@ -139,6 +143,15 @@ class VASMService:
     self.last_side_at = {"left": 0.0, "right": 0.0}
     self.next_side = "left"
     self.followup_until = 0.0
+
+    # Background vehicle-object scanner, independent of BSD/blk.
+    self.object_detections = {"left": [], "right": []}
+    self.object_confidence = {"left": 0.0, "right": 0.0}
+    self.object_updated_nanos = {"left": 0, "right": 0}
+    self.last_object_scan_at = 0.0
+    self.next_object_side = "left"
+    self.object_tracks = {"left": [], "right": []}
+    self.next_object_track_id = 1
     self.camera_error = "waiting for wide road camera"
     self.sm = messaging.SubMaster(["carState", "modelV2"])
     self.pm = messaging.PubMaster(["customReservedRawData0"])
@@ -250,10 +263,33 @@ class VASMService:
       for side in ("left", "right"):
         valid = bool(camera_available and self.inference.valid and vasm_fresh and self.vasm_gate["active"] and
                      self.vasm_gate["side"] == side and self.vasm_result["side"] == side)
+        detections = []
+        if valid:
+          for det in self.inference.detections.get(side, [])[:12]:
+            x1, y1, x2, y2 = det["bbox"]
+            cx, cy = det["center"]
+            detections.append({
+              "confidence": round(float(det["confidence"]), 4),
+              "classId": int(det["class_id"]),
+              "bbox": [
+                round(float(x1), 1),
+                round(float(y1), 1),
+                round(float(x2), 1),
+                round(float(y2), 1),
+              ],
+              "center": [
+                round(float(cx), 1),
+                round(float(cy), 1),
+              ],
+            })
+
         vehicle_sides[side] = {
           "valid": valid,
           "active": self.vasm_result[side] if valid else False,
           "confidence": self.inference.confidence[side] if valid else 0.0,
+          "score": self.inference.scores[side] if valid else 0.0,
+          "detections": detections,
+          "detectionCount": len(detections),
         }
       lane_timestamp = self.lane_result["updatedMonoTimeNanos"]
       lane_fresh = bool(road_camera_available and self.lane_inference.valid and self.lane_result["valid"] and
@@ -352,6 +388,14 @@ class VASMService:
     blindspot_valid = any(side["valid"] for side in status["vehicleSide"].values())
     blindspot_side = next((side for side in ("left", "right") if sides[side]["valid"]), "")
     now_nanos = time.monotonic_ns()
+
+    with self.lock:
+      object_left = list(self.object_detections["left"])
+      object_right = list(self.object_detections["right"])
+      object_left_confidence = float(self.object_confidence["left"])
+      object_right_confidence = float(self.object_confidence["right"])
+      object_left_updated = int(self.object_updated_nanos["left"])
+      object_right_updated = int(self.object_updated_nanos["right"])
     payload = json.dumps({
       "type": "xiaogeVision",
       "version": 1,
@@ -368,6 +412,20 @@ class VASMService:
         "valid": blindspot_valid,
         "side": blindspot_side,
         "receivedMonoTimeNanos": status["inference"]["updatedMonoTimeNanos"] or now_nanos,
+        "leftDetectionCount": sides["left"].get("detectionCount", 0),
+        "rightDetectionCount": sides["right"].get("detectionCount", 0),
+        "leftDetections": sides["left"].get("detections", []),
+        "rightDetections": sides["right"].get("detections", []),
+      },
+      "objects": {
+        "left": object_left,
+        "right": object_right,
+        "leftCount": len(object_left),
+        "rightCount": len(object_right),
+        "leftConfidence": object_left_confidence,
+        "rightConfidence": object_right_confidence,
+        "leftUpdatedMonoTimeNanos": object_left_updated,
+        "rightUpdatedMonoTimeNanos": object_right_updated,
       },
     }, separators=(",", ":")).encode()
     with self.publish_lock:
@@ -391,6 +449,168 @@ class VASMService:
     output = BytesIO()
     Image.fromarray(gray).save(output, "JPEG", quality=50)
     return output.getvalue()
+
+  def _log_object_tracks(self, side: str, tracks: list[dict]) -> None:
+    """Append compact object-tracking diagnostics for later drive review."""
+    if not tracks:
+      try:
+        with open(OBJECT_TRACK_LOG_PATH, "a", encoding="utf-8") as f:
+          f.write(
+            f"{time.strftime('%Y-%m-%d %H:%M:%S')} "
+            f"side={side} tracks=0\n"
+          )
+      except OSError:
+        pass
+      return
+
+    try:
+      now_text = time.strftime("%Y-%m-%d %H:%M:%S")
+
+      with open(OBJECT_TRACK_LOG_PATH, "a", encoding="utf-8") as f:
+        for track in tracks:
+          center = track.get("center", (0.0, 0.0))
+          bbox = track.get("bbox", (0.0, 0.0, 0.0, 0.0))
+
+          line = (
+            f"{now_text} "
+            f"side={side} "
+            f"id={track.get('trackId', -1)} "
+            f"cls={track.get('classification', 'UNKNOWN')} "
+            f"ego={track.get('egoSpeedKph', 0.0):.1f} "
+            f"seen={track.get('seenCount', 0)} "
+            f"age={track.get('ageMs', 0.0) / 1000.0:.1f}s "
+            f"conf={track.get('confidence', 0.0):.3f} "
+            f"center=({float(center[0]):.1f},{float(center[1]):.1f}) "
+            f"dCenter={track.get('deltaCenterPx', 0.0):.1f} "
+            f"area={track.get('bboxArea', 0.0):.1f} "
+            f"areaPct={track.get('deltaAreaPct', 0.0):+.1f} "
+            f"static={int(bool(track.get('stationaryCandidate', False)))} "
+            f"bbox=({float(bbox[0]):.1f},{float(bbox[1]):.1f},"
+            f"{float(bbox[2]):.1f},{float(bbox[3]):.1f})"
+          )
+
+          f.write(line + "\n")
+
+    except OSError:
+      pass
+
+
+  def _update_object_tracks(self, side: str, detections: list[dict], now_nanos: int, v_ego: float) -> list[dict]:
+    """Associate current detections with recent detections on the same side."""
+    previous = [
+      track for track in self.object_tracks[side]
+      if 0 <= now_nanos - int(track["lastSeenNanos"]) <= OBJECT_TRACK_MAX_AGE_NS
+    ]
+
+    used_track_ids = set()
+    output = []
+
+    for det in detections:
+      cx, cy = det["center"]
+      x1, y1, x2, y2 = det["bbox"]
+      area = max(1.0, (x2 - x1) * (y2 - y1))
+
+      best = None
+      best_distance = float("inf")
+
+      for track in previous:
+        track_id = int(track["trackId"])
+        if track_id in used_track_ids:
+          continue
+
+        tx, ty = track["center"]
+        distance = ((cx - tx) ** 2 + (cy - ty) ** 2) ** 0.5
+
+        if distance < best_distance and distance <= OBJECT_TRACK_MATCH_MAX_PX:
+          best = track
+          best_distance = distance
+
+      if best is None:
+        track_id = self.next_object_track_id
+        self.next_object_track_id += 1
+
+        first_seen = now_nanos
+        seen_count = 1
+        delta_center_px = 0.0
+        delta_area_pct = 0.0
+        prev_area = area
+
+      else:
+        track_id = int(best["trackId"])
+        first_seen = int(best["firstSeenNanos"])
+        seen_count = int(best["seenCount"]) + 1
+        used_track_ids.add(track_id)
+
+        prev_bbox = best["bbox"]
+        px1, py1, px2, py2 = prev_bbox
+        prev_area = max(1.0, (px2 - px1) * (py2 - py1))
+
+        delta_center_px = best_distance
+        delta_area_pct = ((area - prev_area) / prev_area) * 100.0
+
+      age_ms = (now_nanos - first_seen) / 1_000_000.0
+
+      # Only a preliminary image-space candidate.
+      # Final stationary/parked classification must also use ego motion.
+      stationary_candidate = (
+        seen_count >= 3 and
+        age_ms >= 2500.0 and
+        delta_center_px <= 90.0 and
+        abs(delta_area_pct) <= 35.0
+      )
+
+      # Preliminary image-space object classification.
+      # These labels are diagnostic only and are NOT connected to HUD or control.
+      if seen_count < 2 or age_ms < 1200.0:
+        classification = "UNKNOWN"
+
+      elif delta_area_pct >= 35.0:
+        classification = "APPROACHING"
+
+      elif delta_center_px >= 140.0:
+        classification = "PASSING"
+
+      elif (
+        stationary_candidate and
+        float(v_ego) * 3.6 >= 5.0
+      ):
+        classification = "LIKELY_STATIC"
+
+      elif (
+        delta_center_px <= 75.0 and
+        abs(delta_area_pct) <= 20.0
+      ):
+        classification = "MOVING_WITH_US"
+
+      else:
+        classification = "UNKNOWN"
+
+      tracked = {
+        **det,
+        "trackId": track_id,
+        "seenCount": seen_count,
+        "firstSeenNanos": first_seen,
+        "lastSeenNanos": now_nanos,
+        "ageMs": round(age_ms, 1),
+
+        "bboxArea": round(area, 1),
+        "previousBboxArea": round(prev_area, 1),
+        "deltaCenterPx": round(delta_center_px, 1),
+        "deltaAreaPct": round(delta_area_pct, 1),
+
+        "stationaryCandidate": bool(stationary_candidate),
+        "classification": classification,
+        "egoSpeedKph": round(float(v_ego) * 3.6, 1),
+
+        "matchDistancePx": round(best_distance, 1) if best is not None else None,
+      }
+
+      output.append(tracked)
+
+    self.object_tracks[side] = output
+    return output
+
+
 
   def run_camera(self) -> None:
     from msgq.visionipc import VisionIpcClient, VisionStreamType
@@ -427,9 +647,84 @@ class VASMService:
             interval = FOLLOWUP_INTERVAL_SECONDS if now < self.followup_until else self.base_interval_seconds
             if now - self.last_inference_at < interval:
               continue
+
         if not gate_active:
-          if publish_clear:
+          try:
+            with open("/data/yong_object_flow.log", "a", encoding="utf-8") as f:
+              f.write(
+                f"{time.strftime('%Y-%m-%d %H:%M:%S')} "
+                f"gate=0 lastScan={self.last_object_scan_at:.3f} now={now:.3f}\n"
+              )
+          except OSError:
+            pass
+
+          object_scan_ran = False
+
+          if now - self.last_object_scan_at >= OBJECT_SCAN_INTERVAL_SECONDS:
+            object_side = self.next_object_side
+            frame = pack_nv12(
+              buffer.data,
+              buffer.width,
+              buffer.height,
+              buffer.stride,
+              buffer.uv_offset,
+            )
+
+            confidence = 0.0
+            detections = []
+
+            with self.vasm_inference_lock:
+              configured_sides = self.inference.configured_sides
+              if object_side in configured_sides and self.inference.valid:
+                # Background scans may run before the first BSD inference,
+                # so prepare camera-scaled crop/mask geometry here as well.
+                self.inference._prepare_geometry(buffer.height, buffer.width)
+
+                confidence = self.inference._confidence(
+                  frame,
+                  buffer.height,
+                  object_side,
+                )
+
+                detections = [
+                  {
+                    "confidence": float(det["confidence"]),
+                    "class_id": int(det["class_id"]),
+                    "bbox": tuple(float(v) for v in det["bbox"]),
+                    "center": tuple(float(v) for v in det["center"]),
+                  }
+                  for det in self.inference.detections.get(object_side, [])
+                ]
+
+                object_scan_ran = True
+
+            with self.lock:
+              now_nanos = time.monotonic_ns()
+              try:
+                v_ego = float(self.sm["carState"].vEgo)
+              except Exception:
+                v_ego = 0.0
+
+              tracked_detections = self._update_object_tracks(
+                object_side,
+                detections,
+                now_nanos,
+                v_ego,
+              )
+              self.object_detections[object_side] = tracked_detections
+              self.object_confidence[object_side] = float(confidence)
+
+              self._log_object_tracks(
+                object_side,
+                tracked_detections,
+              )
+              self.object_updated_nanos[object_side] = now_nanos
+              self.last_object_scan_at = now
+              self.next_object_side = "right" if object_side == "left" else "left"
+
+          if publish_clear or object_scan_ran:
             self.publish_vision_result()
+
           continue
         with self.vasm_inference_lock:
           configured_sides = self.inference.configured_sides

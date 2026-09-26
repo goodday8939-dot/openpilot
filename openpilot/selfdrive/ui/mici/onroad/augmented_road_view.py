@@ -454,6 +454,27 @@ class AugmentedRoadView(CameraView):
     ])
     self._model_renderer.set_transform(video_transform @ calib_transform)
 
+    # Xiaoge object detections are always WIDE-camera pixel coordinates.
+    #
+    # WIDE display:
+    #   wide pixel -> screen
+    #
+    # ROAD display:
+    #   wide pixel -> normalized camera ray -> road-camera pixel -> screen
+    #
+    # This is an optical-ray approximation. It does not model wide-lens
+    # distortion or camera-center parallax, but is suitable for HUD diagnostics.
+    if is_wide_camera:
+      object_video_transform = video_transform.copy()
+    else:
+      wide_intrinsic = device_camera.ecam.intrinsics
+      road_intrinsic = device_camera.fcam.intrinsics
+
+      wide_to_road = road_intrinsic @ np.linalg.inv(wide_intrinsic)
+      object_video_transform = video_transform @ wide_to_road
+
+    self._vision_renderer.set_camera_transform(object_video_transform)
+
     return self._cached_matrix
 
 

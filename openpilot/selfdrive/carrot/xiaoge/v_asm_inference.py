@@ -54,6 +54,16 @@ class VASMInference:
     self.active = {"left": False, "right": False}
     self.confidence = {"left": 0.0, "right": 0.0}
 
+    # Vehicle detections in full camera coordinates.
+    # Each item:
+    # {
+    #   "confidence": float,
+    #   "class_id": int,
+    #   "bbox": (x1, y1, x2, y2),
+    #   "center": (cx, cy),
+    # }
+    self.detections = {"left": [], "right": []}
+
   @property
   def configured_sides(self) -> tuple[str, ...]:
     return tuple(side for side in ("left", "right") if self.raw_polygons[side] is not None)
@@ -96,25 +106,91 @@ class VASMInference:
 
   def _confidence(self, nv12: np.ndarray, frame_height: int, side: str) -> float:
     bbox = self.bboxes[side]
+    self.detections[side] = []
+
     if bbox is None or self.net is None:
       return 0.0
+
     x, y, width, height = bbox
     y_crop = nv12[y:y + height, x:x + width]
     uv_crop = nv12[frame_height + y // 2:frame_height + (y + height) // 2, x:x + width]
+
     rgb = cv2.cvtColor(np.vstack((y_crop, uv_crop)), cv2.COLOR_YUV2RGB_NV12)
     rgb = cv2.bitwise_and(rgb, rgb, mask=self.masks[side])
     rgb = cv2.resize(rgb, (MODEL_INPUT_WIDTH, MODEL_INPUT_HEIGHT), interpolation=cv2.INTER_LINEAR)
+
     blob = np.transpose(rgb.astype(np.float32) / 255.0, (2, 0, 1))[None, :]
     self.net.setInput(blob)
+
     predictions = np.squeeze(self.net.forward())
-    if predictions.ndim == 2:
-      if predictions.shape[0] < predictions.shape[1]:
-        predictions = predictions.T
-      if predictions.shape[1] >= 6:
-        predictions = predictions[np.round(predictions[:, 5]).astype(int) == 0]
-        return float(np.max(predictions[:, 4])) if len(predictions) else 0.0
-      return float(np.max(predictions[:, 4 if predictions.shape[1] >= 5 else 0]))
-    return float(np.max(predictions)) if predictions.size else 0.0
+
+    if predictions.ndim != 2 or predictions.size == 0:
+      return float(np.max(predictions)) if predictions.size else 0.0
+
+    # Model output is expected as:
+    # [x1, y1, x2, y2, confidence, class_id]
+    if predictions.shape[0] < predictions.shape[1]:
+      predictions = predictions.T
+
+    if predictions.shape[1] < 5:
+      return float(np.max(predictions)) if predictions.size else 0.0
+
+    # Vehicle class only when class information exists.
+    if predictions.shape[1] >= 6:
+      class_ids = np.round(predictions[:, 5]).astype(int)
+      vehicle_predictions = predictions[class_ids == 0]
+    else:
+      vehicle_predictions = predictions
+
+    if len(vehicle_predictions) == 0:
+      return 0.0
+
+    # Convert model-input coordinates back to the full camera image.
+    scale_x = width / MODEL_INPUT_WIDTH
+    scale_y = height / MODEL_INPUT_HEIGHT
+
+    detections = []
+
+    for row in vehicle_predictions:
+      confidence = float(row[4])
+
+      # Keep weak detections out of the object list.
+      # This does NOT change the existing blindspot threshold logic.
+      if confidence < 0.05:
+        continue
+
+      x1_m, y1_m, x2_m, y2_m = map(float, row[:4])
+
+      x1 = x + x1_m * scale_x
+      y1 = y + y1_m * scale_y
+      x2 = x + x2_m * scale_x
+      y2 = y + y2_m * scale_y
+
+      # Normalize and clamp to this side's crop.
+      left = max(float(x), min(float(x + width), min(x1, x2)))
+      top = max(float(y), min(float(y + height), min(y1, y2)))
+      right = max(float(x), min(float(x + width), max(x1, x2)))
+      bottom = max(float(y), min(float(y + height), max(y1, y2)))
+
+      if right <= left or bottom <= top:
+        continue
+
+      cx = (left + right) * 0.5
+      cy = (top + bottom) * 0.5
+
+      detections.append({
+        "confidence": confidence,
+        "class_id": int(round(float(row[5]))) if len(row) >= 6 else 0,
+        "bbox": (left, top, right, bottom),
+        "center": (cx, cy),
+      })
+
+    detections.sort(key=lambda item: item["confidence"], reverse=True)
+    self.detections[side] = detections
+
+    # Preserve the existing blindspot behavior:
+    # return the highest vehicle confidence regardless of our 0.05 storage cutoff.
+    return float(np.max(vehicle_predictions[:, 4]))
 
   def update(self, nv12: np.ndarray, width: int, height: int, side: str, threshold: float, smoothing_seconds: float, dt: float) -> None:
     self._prepare_geometry(height, width)

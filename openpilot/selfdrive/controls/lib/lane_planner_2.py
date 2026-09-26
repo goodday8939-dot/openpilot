@@ -1,4 +1,6 @@
 import math
+import os
+import time
 import numpy as np
 from openpilot.cereal import log
 from openpilot.common.filter_simple import FirstOrderFilter
@@ -6,6 +8,7 @@ from openpilot.common.realtime import DT_MDL
 from openpilot.common.swaglog import cloudlog
 # from openpilot.common.logger import sLogger
 from openpilot.common.params import Params
+from openpilot.selfdrive.controls.lib.standstill_turn_intent import StandstillTurnIntent, apply_turn_boost
 
 TRAJECTORY_SIZE = 33
 # positive numbers go right
@@ -71,11 +74,16 @@ class LanePlanner:
     self.lane_offset_filtered = FirstOrderFilter(0.0, 2.0, DT_MDL)
     self.avoid_offset_filtered_x = 0.0  # 정차물체 회피 오프셋 (빠르게 진입, 천천히 복귀)
     self._avoid_log_frame = 0  # CARROT_AVOID 로그 스로틀용 프레임 카운터
+    self.avoid_left_rear_near_seen = False
+    self.avoid_right_rear_near_seen = False
+    self.avoid_bsd_hold_time = 0.0
 
     self.lanefull_mode = False
     self.d_prob_count = 0
 
     self.params = Params()
+    self.turn_intent = StandstillTurnIntent()  # YongPilot 정차 출발 회전 의도
+    self._ti_log_frame = 0
 
   def parse_model(self, md):
 
@@ -239,26 +247,205 @@ class LanePlanner:
         _offset_gate = np.interp(self.d_prob, [0, 0.3], [0, 1])
       self.lane_offset_filtered.update(_offset_gate * offset_total)
 
-    ## 정차물체 회피 오프셋: 모델이 이미 만든 회피량(diff_center)을 증폭 + 비대칭 필터
-    ## (진입은 빠르게/복귀는 천천히) - 웹당근(설정)에서 조정 가능
-    avoid_boost = float(self.params.get_int("AvoidOffsetBoostPct")) * 0.01
-    avoid_attack_tau = float(self.params.get_int("AvoidAttackTauCs")) * 0.01
-    avoid_release_tau = float(self.params.get_int("AvoidReleaseTauCs")) * 0.01
-    avoid_gate = 1.0  # laneless(골목 등)에서도 회피 기능 유지
-    avoid_target = np.clip(diff_center * avoid_boost, -ADJUST_OFFSET_LIMIT, ADJUST_OFFSET_LIMIT) * avoid_gate
-    avoid_tau = avoid_attack_tau if abs(avoid_target) > abs(self.avoid_offset_filtered_x) else avoid_release_tau
-    avoid_alpha = DT_MDL / (avoid_tau + DT_MDL)
-    self.avoid_offset_filtered_x = (1.0 - avoid_alpha) * self.avoid_offset_filtered_x + avoid_alpha * avoid_target
+    ## YONG_AVOID_V2
+    ## 실제 측전방 물체가 확인될 때만 모델 회피량(diff_center)을 추가 증폭한다.
+    ##
+    ## openpilot vehicle coordinates: +Y = LEFT, -Y = RIGHT
+    ## +offset = 오른쪽 물체를 피해 왼쪽으로 회피
+    ## -offset = 왼쪽 물체를 피해 오른쪽으로 회피
+    ##
+    ## 중요:
+    ## 피하는 방향에 차량이 있으면 모델 원래 경로 자체를 지우는 것이 아니라
+    ## 추가 증폭(avoid_offset)만 막는다.
 
-    # 회피기동이 실제로 유의미하게 작동 중일 때만(5cm 이상) 약 1초에 한 번
-    # swaglog에 남긴다 - 나중에 로그 분석 시 "CARROT_AVOID"로 grep해서
-    # 언제/얼마나 세게 회피했는지 확인 가능.
-    self._avoid_log_frame += 1
-    if abs(self.avoid_offset_filtered_x) > 0.05 and self._avoid_log_frame % 20 == 0:
-      cloudlog.info(
-        f"CARROT_AVOID v={v_ego*3.6:.1f}kph diff_center={diff_center:.3f} "
-        f"avoid_target={avoid_target:.3f} avoid_offset={self.avoid_offset_filtered_x:.3f}"
+    avoid_v2_enabled = bool(self.params.get_int("AvoidV2Enabled"))
+    avoid_boost = float(self.params.get_int("AvoidOffsetBoostPct")) * 0.01
+    avoid_attack_tau = max(0.01, float(self.params.get_int("AvoidAttackTauCs")) * 0.01)
+    avoid_release_tau = max(0.01, float(self.params.get_int("AvoidReleaseTauCs")) * 0.01)
+
+    v_kph = v_ego * 3.6
+
+    # 코너레이더 거리
+    lf_d = float(getattr(CS, "leftLongDist", 0.0))
+    rf_d = float(getattr(CS, "rightLongDist", 0.0))
+    lr_d = float(getattr(CS, "leftRearLongDist", 0.0))
+    rr_d = float(getattr(CS, "rightRearLongDist", 0.0))
+
+    bsd_l = bool(getattr(CS, "leftBlindspot", False))
+    bsd_r = bool(getattr(CS, "rightBlindspot", False))
+
+    # 우선 모델이 요구하는 회피 방향/크기를 계산한다.
+    raw_avoid_target = np.clip(
+      -diff_center * avoid_boost,
+      -ADJUST_OFFSET_LIMIT,
+      ADJUST_OFFSET_LIMIT,
+    )
+
+    # -----------------------------------------------------
+    # 실제 물체 gate
+    #
+    # +target : 오른쪽 물체 때문에 왼쪽 회피
+    # -target : 왼쪽 물체 때문에 오른쪽 회피
+    #
+    # 현재 Hyundai CarState가 전측방 차단 판단에 사용하는
+    # 7m 기준과 동일하게 시작한다.
+    # -----------------------------------------------------
+    obstacle_gate = 0.0
+
+    if raw_avoid_target > 0.02:
+      # 왼쪽으로 피하는 상황 -> 오른쪽 장애물 확인
+      obstacle_gate = 1.0 if 0.0 < rf_d < 7.0 else 0.0
+
+    elif raw_avoid_target < -0.02:
+      # 오른쪽으로 피하는 상황 -> 왼쪽 장애물 확인
+      obstacle_gate = 1.0 if 0.0 < lf_d < 7.0 else 0.0
+
+    # -----------------------------------------------------
+    # 피하는 방향(side destination) 차량 확인
+    #
+    # 왼쪽으로 피할 때는 왼쪽 차량을,
+    # 오른쪽으로 피할 때는 오른쪽 차량을 본다.
+    #
+    # 옆 차량이 있으면 '추가 증폭'만 제거한다.
+    # -----------------------------------------------------
+    side_blocked = False
+
+    if raw_avoid_target > 0.02:
+      # 왼쪽으로 이동하려는 상황 -> 왼쪽 공간 확인
+      side_blocked = (
+        bsd_l
+        or 0.0 < lf_d < 7.0
+        or 0.0 < lr_d < 7.0
       )
+
+    elif raw_avoid_target < -0.02:
+      # 오른쪽으로 이동하려는 상황 -> 오른쪽 공간 확인
+      side_blocked = (
+        bsd_r
+        or 0.0 < rf_d < 7.0
+        or 0.0 < rr_d < 7.0
+      )
+
+    side_scale = 0.0 if side_blocked else 1.0
+
+    # -----------------------------------------------------
+    # 속도 제한
+    #
+    # <= 50 km/h : 100 %
+    # 50~60 km/h : 선형 감소
+    # >= 60 km/h : 추가 증폭 없음
+    # -----------------------------------------------------
+    speed_scale = float(np.interp(
+      v_kph,
+      [0.0, 50.0, 60.0],
+      [1.0, 1.0, 0.0],
+    ))
+
+    avoid_target = (
+      raw_avoid_target
+      * obstacle_gate
+      * side_scale
+      * speed_scale
+      if avoid_v2_enabled
+      else 0.0
+    )
+
+    # -----------------------------------------------------
+    # 빠른 회피 / 느린 복귀
+    # -----------------------------------------------------
+    avoid_tau = (
+      avoid_attack_tau
+      if abs(avoid_target) > abs(self.avoid_offset_filtered_x)
+      else avoid_release_tau
+    )
+
+    avoid_alpha = DT_MDL / (avoid_tau + DT_MDL)
+
+    # -----------------------------------------------------
+    # 복귀할 때 피하는 방향의 후측방 차량 확인
+    #
+    # +offset = 오른쪽 장애물을 피해 왼쪽에 있음 -> 복귀 전 오른쪽 후측방 확인
+    # -offset = 왼쪽 장애물을 피해 오른쪽에 있음 -> 복귀 전 왼쪽 후측방 확인
+    # -----------------------------------------------------
+    bsd_hold = False
+
+    if self.avoid_offset_filtered_x > 0.05:
+      bsd_hold = (
+        bsd_r
+        or 0.0 < rr_d < 7.0
+      )
+
+    elif self.avoid_offset_filtered_x < -0.05:
+      bsd_hold = (
+        bsd_l
+        or 0.0 < lr_d < 7.0
+      )
+
+    avoid_releasing = (
+      abs(avoid_target) < abs(self.avoid_offset_filtered_x)
+      and avoid_target * self.avoid_offset_filtered_x >= 0.0
+    )
+
+    # BSD hold 최대 3초.
+    #
+    # 3초가 지나면 옆 차량이 계속 있어도 추가 회피 오프셋은
+    # release_tau 속도로 천천히 제거한다.
+    hold_active = False
+
+    if bsd_hold and avoid_releasing:
+      if self.avoid_bsd_hold_time < 3.0:
+        self.avoid_bsd_hold_time += DT_MDL
+        hold_active = True
+      else:
+        hold_active = False
+    else:
+      self.avoid_bsd_hold_time = 0.0
+
+    if not hold_active:
+      self.avoid_offset_filtered_x = (
+        (1.0 - avoid_alpha) * self.avoid_offset_filtered_x
+        + avoid_alpha * avoid_target
+      )
+
+    # 기존 회피 동작 로그
+    self._avoid_log_frame += 1
+    if abs(raw_avoid_target) > 0.02 and self._avoid_log_frame % 20 == 0:
+      cloudlog.info(
+        f"CARROT_AVOID_V2 v={v_kph:.1f}kph "
+        f"diff={diff_center:.3f} raw={raw_avoid_target:.3f} "
+        f"gate={int(obstacle_gate)} sideBlock={int(side_blocked)} "
+        f"speedScale={speed_scale:.2f} "
+        f"target={avoid_target:.3f} offset={self.avoid_offset_filtered_x:.3f} "
+        f"hold={int(hold_active)} holdTime={self.avoid_bsd_hold_time:.2f} "
+        f"LF={lf_d:.2f} RF={rf_d:.2f} LR={lr_d:.2f} RR={rr_d:.2f} "
+        f"bsdL={int(bsd_l)} bsdR={int(bsd_r)}"
+      )
+
+    # YONG_AVOID_SENSOR_LOG
+    # 50km/h 이하에서는 회피가 발생하지 않아도 코너레이더 값을 기록한다.
+    if v_ego * 3.6 <= 50.0 and self._avoid_log_frame % 20 == 0:
+      lf_d = float(getattr(CS, "leftLongDist", 0.0))
+      rf_d = float(getattr(CS, "rightLongDist", 0.0))
+      lr_d = float(getattr(CS, "leftRearLongDist", 0.0))
+      rr_d = float(getattr(CS, "rightRearLongDist", 0.0))
+
+      lf_y = float(getattr(CS, "leftLatDist", 0.0))
+      rf_y = float(getattr(CS, "rightLatDist", 0.0))
+      lr_y = float(getattr(CS, "leftRearLatDist", 0.0))
+      rr_y = float(getattr(CS, "rightRearLatDist", 0.0))
+
+      if (lf_d > 0.0 or rf_d > 0.0 or lr_d > 0.0 or rr_d > 0.0
+          or abs(self.avoid_offset_filtered_x) > 0.05):
+        cloudlog.info(
+          f"YONG_AVOID v={v_ego*3.6:.1f}kph "
+          f"LF={lf_d:.2f}/{lf_y:.2f} RF={rf_d:.2f}/{rf_y:.2f} "
+          f"LR={lr_d:.2f}/{lr_y:.2f} RR={rr_d:.2f}/{rr_y:.2f} "
+          f"diff={diff_center:.3f} target={avoid_target:.3f} "
+          f"offset={self.avoid_offset_filtered_x:.3f} "
+          f"hold={int(bsd_hold)} "
+          f"bsdL={int(bool(getattr(CS, 'leftBlindspot', False)))} "
+          f"bsdR={int(bool(getattr(CS, 'rightBlindspot', False)))}"
+        )
 
     ## laneless at lowspeed
     self.d_prob *= np.interp(v_ego*3.6, [5., 10.], [0.0, 1.0])
@@ -286,16 +473,56 @@ class LanePlanner:
           path_xyz[:,1] = self.d_prob * lane_path_y_interp + (1.0 - self.d_prob) * path_xyz[:,1]
 
 
+    ## YongPilot 정차 출발 회전 의도 (standstill_turn_intent v2.1)
+    TURN_INTENT_BOOST_PCT = 25.0
+    try:
+      _ti_dir, _ti_ramp, _ti_straight = self.turn_intent.update(
+        DT_MDL, v_ego,
+        bool(getattr(CS, 'leftBlinker', False)),
+        bool(getattr(CS, 'rightBlinker', False)),
+        bool(getattr(CS, 'steeringPressed', False)),
+        float(getattr(CS, 'yawRate', 0.0)),
+        path_xyz[:, 0], path_xyz[:, 1])
+    except Exception:
+      self.turn_intent.reset()
+      _ti_dir, _ti_ramp, _ti_straight = 0, 0.0, False
+
     ## 교차로 등 laneless 저속 급커브에서 회전 부족 보정 - 웹당근에서 조정 가능
     intersection_turn_boost = float(self.params.get_int("IntersectionTurnBoostPct")) * 0.01
-    if intersection_turn_boost > 0.0 and abs(curve_speed) > 0.1:
+    if intersection_turn_boost > 0.0 and abs(curve_speed) > 0.1 and not _ti_straight:
       _laneless_gate = np.clip(1.0 - self.d_prob / 0.3, 0.0, 1.0)
       _sharp_gate = np.clip((40.0 - abs(curve_speed)) / (40.0 - 10.0), 0.0, 1.0)
       _dist_scale = np.clip(path_t / 3.0, 0.0, 1.0)
       turn_boost_offset = intersection_turn_boost * _laneless_gate * _sharp_gate * _dist_scale * np.sign(curve_speed) * 1.0
       path_xyz[:, 1] += turn_boost_offset
 
-    path_xyz[:, 1] += (CAMERA_OFFSET + self.lane_offset_filtered.x + self.avoid_offset_filtered_x)
+    if _ti_dir != 0 and _ti_ramp > 0.0:
+      try:
+        path_xyz = apply_turn_boost(path_xyz, _ti_dir, _ti_ramp, TURN_INTENT_BOOST_PCT)
+      except Exception:
+        pass
+
+    _ti_lane_offset = 0.0 if _ti_straight else self.lane_offset_filtered.x
+    path_xyz[:, 1] += (CAMERA_OFFSET + _ti_lane_offset + self.avoid_offset_filtered_x)
+
+    # 관찰 전용 기록 (기능 작동 중일 때만, 0.25초 간격)
+    if _ti_dir != 0 or _ti_straight:
+      self._ti_log_frame += 1
+      if self._ti_log_frame % 5 == 1:
+        try:
+          _new = not os.path.exists('/data/turn_intent_events.csv')
+          with open('/data/turn_intent_events.csv', 'a') as _f:
+            if _new:
+              _f.write('time,kph,dir,ramp,straight,lblink,rblink,yawRate,y8m\n')
+            _y8 = float(np.interp(8.0, path_xyz[:, 0], path_xyz[:, 1]))
+            _f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')},{v_ego*3.6:.1f},{_ti_dir},{_ti_ramp:.2f},"
+                     f"{int(_ti_straight)},{int(bool(getattr(CS, 'leftBlinker', False)))},"
+                     f"{int(bool(getattr(CS, 'rightBlinker', False)))},"
+                     f"{float(getattr(CS, 'yawRate', 0.0)):.3f},{_y8:.2f}\n")
+        except Exception:
+          pass
+    else:
+      self._ti_log_frame = 0
 
     self.offset_total = self.lane_offset_filtered.x + self.avoid_offset_filtered_x
 

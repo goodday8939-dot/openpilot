@@ -138,6 +138,9 @@ class LongitudinalPlanner:
 
     self.v_cruise_kph = 0.0
 
+    # YongPilot downhill follow compensation
+    self.downhill_pitch_filtered = 0.0
+
     self.params = Params()
 
   def update_lead_tracks(self, radar_state):
@@ -362,6 +365,7 @@ class LongitudinalPlanner:
       ),
       a_lead=lead.aLeadK,
       a_ego=sm['carState'].aEgo,
+      v_rel=lead.vRel,
     )
     if preview_request.active:
       requested_preview = rate_limit_preview(
@@ -369,7 +373,26 @@ class LongitudinalPlanner:
         self.lead_preview,
       )
       self.lead_preview = clip_preview_offset(action_t, requested_preview)
-      self.lead_preview_accel = preview_request.lead_accel_signal
+      # YongPilot lead-response smoothing
+      # 앞차의 짧은 가감속을 속도별로 일부 완충한다.
+      raw_lead_preview_accel = float(preview_request.lead_accel_signal)
+      v_ego_kph_preview = float(sm['carState'].vEgo) * CV.MS_TO_KPH
+
+      if v_ego_kph_preview < 40.0:
+        lead_preview_factor = 0.90
+      elif v_ego_kph_preview < 60.0:
+        lead_preview_factor = 0.80
+      elif v_ego_kph_preview < 80.0:
+        lead_preview_factor = 0.60
+      else:
+        lead_preview_factor = 0.50
+
+      # 실제로 앞차에 빠르게 접근하거나 앞차가 강하게 감속하면
+      # 안전상 완충하지 않고 원래 반응을 그대로 사용한다.
+      if float(lead.vRel) < -1.0 or raw_lead_preview_accel < -1.0:
+        lead_preview_factor = 1.0
+
+      self.lead_preview_accel = raw_lead_preview_accel * lead_preview_factor
       self.lead_preview_action_time = action_t + self.lead_preview
     else:
       self.lead_preview = 0.0
@@ -406,6 +429,72 @@ class LongitudinalPlanner:
     #  accel_clip[idx] = np.clip(accel_clip[idx], self.prev_accel_clip[idx] - 0.05, self.prev_accel_clip[idx] + 0.05)
     #self.output_a_target = np.clip(output_a_target, accel_clip[0], accel_clip[1])
     #self.prev_accel_clip = accel_clip
+      # =====================================================
+      # YongPilot downhill follow decel v1
+      #
+      # Conservative ~70% first step:
+      #   0 ~ -1 deg : no correction
+      #  -1 ~ -5 deg : progressively stronger
+      #  <= -5 deg   : max additional -0.25 m/s^2
+      #
+      # Only while a valid radar lead is closing or braking.
+      # =====================================================
+      pitch_valid = (
+        len(sm['carControl'].orientationNED) == 3
+        and np.isfinite(sm['carControl'].orientationNED[1])
+      )
+
+      pitch_raw = (
+        float(sm['carControl'].orientationNED[1])
+        if pitch_valid else 0.0
+      )
+
+      DOWNHILL_PITCH_TAU = 0.30
+      pitch_alpha = self.dt / (DOWNHILL_PITCH_TAU + self.dt)
+
+      self.downhill_pitch_filtered += pitch_alpha * (
+        pitch_raw - self.downhill_pitch_filtered
+      )
+
+      downhill_deg = max(
+        0.0,
+        -float(np.degrees(self.downhill_pitch_filtered))
+      )
+
+      downhill_extra_decel = float(np.interp(
+        downhill_deg,
+        [1.0, 5.0],
+        [0.0, 0.25],
+      ))
+
+      downhill_lead_valid = (
+        self.mpc.mode == 'acc'
+        and not reset_state
+        and not sm['carState'].gasPressed
+        and v_ego > (5.0 / 3.6)
+        and lead.status
+        and lead.radar
+        and lead.radarTrackId >= 0
+      )
+
+      lead_closing_or_braking = (
+        downhill_lead_valid
+        and (
+          float(lead.vRel) < -0.05
+          or float(lead.aLeadK) < -0.10
+        )
+      )
+
+      if (
+        pitch_valid
+        and downhill_deg > 1.0
+        and lead_closing_or_braking
+      ):
+        output_a_target = max(
+          accel_limits_turns[0],
+          output_a_target - downhill_extra_decel
+        )
+
     self.output_a_target_base = output_a_target_base
     self.output_a_target = output_a_target
     self.output_v_target_now = output_v_target_now

@@ -45,7 +45,8 @@ A_CHANGE_COST_STARTING = 150. #10. -- EV launch feels too punchy with a low star
 # a_change_cost/jerk_cost를 한 프레임만에 확 낮추지 않고 이 시간(초) 동안
 # 부드럽게 낮춰서 "훅" 튀는 느낌을 없앰. 다 낮아진 뒤(최종 추종 속도/세기)는
 # 기존과 동일하게 유지됨 - 초반 체감만 바뀜.
-LEAD_ACCEL_RESPONSE_RAMP_TIME_S = 0.4
+LEAD_ACCEL_RESPONSE_RAMP_TIME_S = 0.6
+LEAD_ACCEL_RESPONSE_RELEASE_TIME_S = 0.8
 DANGER_ZONE_COST = 100.
 CRASH_DISTANCE = .25
 LEAD_DANGER_FACTOR = 0.8 # 0.75
@@ -256,6 +257,8 @@ class LongitudinalMpc:
     self.lead_accel_response_active = False
     self.lead_accel_response_level = 0
     self.lead_accel_response_ramp = 0.0
+    self.lead_accel_response_release_a_factor = 1.0
+    self.lead_accel_response_release_jerk_factor = 1.0
 
     self.reset()
     self.source = SOURCES[2]
@@ -292,6 +295,8 @@ class LongitudinalMpc:
     self.lead_accel_response_active = False
     self.lead_accel_response_level = 0
     self.lead_accel_response_ramp = 0.0
+    self.lead_accel_response_release_a_factor = 1.0
+    self.lead_accel_response_release_jerk_factor = 1.0
     # timers
     self.solve_time = 0.0
     self.time_qp_solution = 0.0
@@ -369,7 +374,42 @@ class LongitudinalMpc:
     if lead is not None and lead.status:
       x_lead = lead.dRel
       v_lead = lead.vLead
-      a_lead = lead.aLeadK
+
+      raw_a_lead = float(lead.aLeadK)
+      track_id = int(getattr(lead, 'radarTrackId', -1))
+
+      # YongPilot: 50km/h+ smooth following acceleration.
+      # While the lead is pulling away, keep acceleration continuous instead
+      # of reacting sharply to short aLeadK drops. Closing/decelerating leads
+      # bypass the smoothing immediately so braking response is not delayed.
+      if not hasattr(self, '_smooth_follow_a_lead'):
+        self._smooth_follow_a_lead = {}
+
+      smooth_follow = (
+        v_ego * 3.6 >= 50.0
+        and float(lead.vRel) >= 0.0
+        and raw_a_lead >= 0.0
+        and track_id >= 0
+      )
+
+      if smooth_follow:
+        prev_a_lead = self._smooth_follow_a_lead.get(track_id, raw_a_lead)
+
+        # Increase reasonably quickly; release more gradually.
+        tau = 0.25 if raw_a_lead >= prev_a_lead else 0.80
+        alpha = min(1.0, self.dt / max(tau, self.dt))
+        a_lead = prev_a_lead + alpha * (raw_a_lead - prev_a_lead)
+
+        self._smooth_follow_a_lead[track_id] = a_lead
+
+        # Prevent stale track history from growing indefinitely.
+        if len(self._smooth_follow_a_lead) > 16:
+          self._smooth_follow_a_lead = {track_id: a_lead}
+      else:
+        a_lead = raw_a_lead
+        if track_id >= 0:
+          self._smooth_follow_a_lead[track_id] = raw_a_lead
+
       a_lead_tau = lead.aLeadTau
     else:
       # Fake a fast lead car, so mpc can keep running in the same mode
@@ -415,12 +455,12 @@ class LongitudinalMpc:
       and tf_lead.status
       and tf_lead.radar
       and tf_lead.radarTrackId >= 0
-      and tf_lead.vRel >= -1.5  # loosened further for city stop-and-go
     )
     t_follow = carrot.get_T_FOLLOW(
       personality, v_ego, a_ego,
       lead_status=tf_lead_valid,
       lead_accel=tf_lead.aLeadK if tf_lead_valid else 0.0,
+      lead_v_rel=tf_lead.vRel if tf_lead is not None and tf_lead.status else 0.0,
     )
 
     lead_xv_0, lead_v_0 = self.process_lead(radarstate.leadOne)
@@ -551,11 +591,39 @@ class LongitudinalMpc:
     if response_request.active and LEAD_ACCEL_RESPONSE_RAMP_TIME_S > 0.0:
       ramp_step = self.dt / LEAD_ACCEL_RESPONSE_RAMP_TIME_S
       self.lead_accel_response_ramp = min(1.0, self.lead_accel_response_ramp + ramp_step)
-    else:
+
+      ramp = self.lead_accel_response_ramp
+      ramped_a_change_cost_factor = 1.0 + (response_request.a_change_cost_factor - 1.0) * ramp
+      ramped_jerk_cost_factor = 1.0 + (response_request.jerk_cost_factor - 1.0) * ramp
+
+      # Remember the actually applied factors so a brief loss of the
+      # lead-accel condition does not snap the MPC costs back to normal.
+      self.lead_accel_response_release_a_factor = ramped_a_change_cost_factor
+      self.lead_accel_response_release_jerk_factor = ramped_jerk_cost_factor
+
+    elif (response_lead.status and response_lead.vRel >= 0.0 and
+          LEAD_ACCEL_RESPONSE_RELEASE_TIME_S > 0.0):
+      # Lead is still pulling away: release the response smoothly.
+      release_step = self.dt / LEAD_ACCEL_RESPONSE_RELEASE_TIME_S
+      self.lead_accel_response_release_a_factor = min(
+        1.0, self.lead_accel_response_release_a_factor +
+        (1.0 - self.lead_accel_response_release_a_factor) * release_step
+      )
+      self.lead_accel_response_release_jerk_factor = min(
+        1.0, self.lead_accel_response_release_jerk_factor +
+        (1.0 - self.lead_accel_response_release_jerk_factor) * release_step
+      )
       self.lead_accel_response_ramp = 0.0
-    ramp = self.lead_accel_response_ramp
-    ramped_a_change_cost_factor = 1.0 + (response_request.a_change_cost_factor - 1.0) * ramp
-    ramped_jerk_cost_factor = 1.0 + (response_request.jerk_cost_factor - 1.0) * ramp
+      ramped_a_change_cost_factor = self.lead_accel_response_release_a_factor
+      ramped_jerk_cost_factor = self.lead_accel_response_release_jerk_factor
+
+    else:
+      # Closing lead / lost lead: restore normal MPC costs immediately.
+      self.lead_accel_response_ramp = 0.0
+      self.lead_accel_response_release_a_factor = 1.0
+      self.lead_accel_response_release_jerk_factor = 1.0
+      ramped_a_change_cost_factor = 1.0
+      ramped_jerk_cost_factor = 1.0
 
     self.set_weights(
       prev_accel_constraint,

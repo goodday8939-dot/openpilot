@@ -304,6 +304,7 @@ def calculate_curvature(p1, p2, p3):
 class CarrotMan:
   def __init__(self):
     print("************************************************CarrotMan init************************************************")
+    open("/data/carrot_loaded_path.txt", "w").write(__file__)
     self.params = Params()
     self.params_memory = Params("/dev/shm/params")
     self.gps_location_service = get_gps_location_service(self.params)
@@ -2173,6 +2174,13 @@ class CarrotMan:
       # (예: LANECHANGE 좌/우 버튼)도 UDP(7706) 경로와 동일하게 처리한다.
       # carrot_serv.update()가 carrotCmd/carrotArg/carrotIndex 파싱을 전담한다.
     if "carrotCmd" in obj:
+      # YONG_AVOID_DIRECT_HTTP
+      if str(obj.get("carrotCmd", "")).upper() == "AVOID_V2":
+        arg = str(obj.get("carrotArg", "")).strip().upper()
+        if arg in ('ON', '1', 'TRUE'):
+          self.params.put("AvoidV2Enabled", 1)
+        elif arg in ('OFF', '0', 'FALSE'):
+          self.params.put("AvoidV2Enabled", 0)
       self._safe_dispatch_handler("carrotCmd", self.carrot_serv.update, obj)
       handled = True
 
@@ -2327,17 +2335,26 @@ class CarrotMan:
     }, headers={"Access-Control-Allow-Origin": "*"})
 
   async def carrot_http_status(self, request: web.Request):
-    car_state = self.sm['carState']
-    v_cruise = self.sm['controlsState'].vCruiseCluster
-    if v_cruise <= 0:
-      v_cruise = car_state.cruiseState.speedCluster
-    if v_cruise <= 0:
-      v_cruise = car_state.cruiseState.speed
-    return web.json_response({
-      "ok": True,
-      "vCruiseKph": round(v_cruise) if v_cruise > 0 else None,
-      "cruiseEnabled": bool(car_state.cruiseState.enabled),
-    })
+    try:
+      car_state = self.sm['carState']
+      controls_state = self.sm['controlsState']
+
+      curve_review = self.carrot_serv.get_yong_curve_review_status()
+
+      return web.json_response({
+        "ok": True,
+        "currentSpeedKph": round(float(car_state.vEgo) * 3.6),
+        "vCruiseKph": round(float(car_state.vCruiseCluster)),
+        "cruiseEnabled": bool(car_state.cruiseState.enabled),
+        "turnSpeedControlMode": int(self.carrot_serv.turnSpeedControlMode),
+        "avoidV2Enabled": bool(self.params.get_int("AvoidV2Enabled")),
+        "curveReview": curve_review,
+      }, headers={"Access-Control-Allow-Origin": "*"})
+    except Exception as e:
+      return web.json_response({
+        "ok": False,
+        "error": repr(e),
+      }, headers={"Access-Control-Allow-Origin": "*"})
 
   async def carrot_navi_http_server(self, port: int = NAVI_HTTP_PORT):
     app = web.Application(client_max_size=NAVI_HTTP_MAX_BODY_SIZE)
